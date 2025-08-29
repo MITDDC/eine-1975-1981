@@ -1,0 +1,14 @@
+part8/aek1/19751217_3of4_AI_KA_Arch_1180-1183_1184p.tap
+part7/from-john-card-2/3100052.tap
+recovered/vol8/7005039/7005039.tap
+recovered/vol6/7007637/7007637.tap
+recovered/vol6/7007802/7007802.tap
+recovered/vol6/7007816/7007816.tap
+recovered/vol8/7008446/7008446.tap
+images/mit-data-3/b/701362/701362.tap
+recovered/vol8/701419/701419.tap
+recovered/vol2/9004365.tap
+images/ai-ka/ai_ka_arch_3of9_2812_16_21_may_1981.tap
+images/ai-ka/ai_ka_arch_3of9_3054_59_26_aug_1982.tap
+images/dlwes/mit3.tap
+images/dlwes/mit4.tap

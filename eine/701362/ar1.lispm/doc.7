@@ -1,0 +1,84 @@
+	ED-WINDOW-1 bp window
+  ED-WINDOW-1 will anticipate what would happen if <window> were
+displayed with its current TOP-LINE-NUM.  If doing so would result in
+<bp> being "visible", then it returns the X and Y coordinates that the
+blinker for <bp> should have.  Otherwise it concludes that you will
+want to change the TOP-LINE-NUM, and returns NIL and the number of
+raster lines which you will want to see above the point blinker. 
+
+	ED-WINDOW-2 bp rasters window
+  ED-WINDOW-2 determines a good new value for the TOP-LINE-NUM of
+<window>.  It will try to end up with <rasters> scan lines above the
+<bp>, or as best as possible.  It will always return something
+"reasonable" (I hope), no matter how ridiculous <rasters> is.  It
+returns the reccomended TOP-LINE-NUM, and the X and Y coordinates of
+<bp> if that TOP-LINE-NUM is used (three values in all). 
+
+	ED-WINDOW-3 top-line-num window
+  ED-WINDOW-3 updates <window> with the given TOP-LINE-NUM (which
+it saves in the window's array leader).  It will check ED-LINE-MUNGED
+parameters in order to avoid wasting time.  It sets up the window's
+ED-WINDOW-UNMUNGED when finished.
+
+	ED-WINDOW-4 window x y
+  ED-WINDOW-4 fixes up the blinkers on <window>.  If <x> is non-nil,
+it sets the position of the point blinker to <x> by <y>.  Then, if there
+are any "other blinkers", it sets their positions and visibility.
+
+	ED-WINDOW-1-A bp window
+  This is like ED-WINDOW-1, but
+a) it does not care about the "end-zones" of the window; it will be happy
+   to allow <bp> to be displayed there.
+b) it returns NIL 0 0 if <bp> is off the screen, and T <x> <y> if it is on.
+This function is provided for the benefit of "inactive window"-handling
+functions.
+
+>> Middle level functions.
+	The middle level functions know about two flavors of window:
+"active" and "inactive".  In an "active" window, there is presumed to be
+a special bp, which probably has an associated blinking blinker.  This
+blinker MUST be displayed on the screen, and if necessary the TOP-LINE-NUM
+of the window may have to be changed.  In an "inactive" window, there is no
+such restriction.
+
+	ED-WINDOW-BLINKER-UPDATE window
+  This is for use on an "active" window, in which no text has been changed,
+and no bp's have been moved.  [What is it for?]
+
+	ED-WINDOW-REDISPLAY bp window
+  The window is updated, and our best efforts are made to leave the
+TOP-LINE-DISPLAYED alone. 
+
+	ED-WINDOW-RECENTER bp window raster
+  This redisplays the< window>, making its best efforts to leave the <bp>
+<raster> rasters below the top of the window.
+
+	ED-WINDOW-REDISPLAY-INACTIVE
+  This is used on "inactive" windows.  It never changes TOP-LINE-NUM, but
+updates the text and blinkers.
+
+>> High level functions.
+	The high level functions know how to get at the interesting windows,
+and do the right things with them by calling the middle level functions.
+
+	ED-WINDOW-MUNDANE-REDISPLAY [no arguments]
+  This called after a command informs ED-COMMAND-EXECUTE that it may have
+changed text in buffers, or moved buffer pointers which are displayed.
+It calls ED-WINDOW-REDISPLAY on the current window, and ED-WINDOW-REDISPLAY-INACTIVE
+on the non-blind other windows displayed.
+
+	ED-WINDOW-MINIMAL-REDISPLAY
+  This called after a command informs ED-COMMAND-EXECUTE that it has done
+nothing to cause redisplay.  It calls ED-WINDOW-BLINKER-UPDATE on all displayed
+window.  [Why?]
+
+	ED-COM-REPOSITION-WINDOW chr
+  This command recenters the current window; it has no effect on any other
+part of the screen.  It is not currently used.
+
+	ED-COMPLETE-REDISPLAY raster
+  This recenters the current window, and updates all other windows (clearing
+the "blind" ones).  It also clears the STATUS and DEBUG pcs ppr.  [It first fakes out
+all windows involved.]  If <raster> is NIL, the current window is NOT recentered; 
+it is just redisplayed.
+

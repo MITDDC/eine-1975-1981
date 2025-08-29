@@ -1,0 +1,279 @@
+[Aug 25 14:32]  eine
+├── [Aug 25 14:28]  19751217_3of4_AI_KA_Arch_1180-1183_1184p
+│   └── [Aug 25 14:28]  lispm
+│       ├── [Aug  7  1975]  ed.126
+│       └── [May  2  1975]  edfn.qfasl
+├── [Aug 25 14:29]  3100052
+│   ├── [Aug 25 14:29]  lispm2
+│   │   ├── [Dec  8  1977]  ebasic.63
+│   │   ├── [Dec 10  1977]  ebasic.qfasl
+│   │   ├── [Dec 11  1977]  ecmd.qfasl
+│   │   ├── [Dec 11  1977]  edefs.51
+│   │   ├── [Dec 15  1977]  edefs.52
+│   │   ├── [Dec 15  1977]  edfn.51
+│   │   ├── [Dec 15  1977]  edfn.52
+│   │   ├── [Dec 17  1977]  edfn.qfasl
+│   │   ├── [Dec 10  1977]  edis.38
+│   │   ├── [Dec 15  1977]  edis.39
+│   │   ├── [Nov 17  1977]  edis.oqfasl
+│   │   ├── [Dec 10  1977]  edis.qfasl
+│   │   ├── [Dec  9  1977]  edm.126
+│   │   ├── [Dec 10  1977]  edm.128
+│   │   ├── [Dec 10  1977]  edm.qfasl
+│   │   ├── [Dec  7  1977]  edt.qfasl
+│   │   ├── [Dec 13  1977]  edtags.12
+│   │   ├── [Dec 13  1977]  edtags.qfasl
+│   │   ├── [Dec 15  1977]  efile.50
+│   │   ├── [Dec 15  1977]  efile.51
+│   │   ├── [Dec 14  1977]  efile.qfasl
+│   │   ├── [Dec  7  1977]  efont.qfasl
+│   │   ├── [Dec  9  1977]  eine.tags
+│   │   ├── [Dec  7  1977]  einser.qfasl
+│   │   ├── [Dec  7  1977]  emove.qfasl
+│   │   ├── [Dec 11  1977]  erand.32
+│   │   ├── [Dec 11  1977]  erand.qfasl
+│   │   ├── [Dec 10  1977]  esearc.42
+│   │   ├── [Dec 11  1977]  esearc.qfasl
+│   │   ├── [Dec 15  1977]  espac.21
+│   │   ├── [Dec  7  1977]  espac.qfasl
+│   │   ├── [Dec  8  1977]  etable.qfasl
+│   │   ├── [Dec 11  1977]  eutil.50
+│   │   ├── [Dec 13  1977]  eutil.51
+│   │   ├── [Dec 13  1977]  eutil.qfasl
+│   │   ├── [Dec  7  1977]  ewindo.29
+│   │   ├── [Dec 11  1977]  ewindo.qfasl
+│   │   ├── [Dec 14  1977]  ewrdls.10
+│   │   ├── [Dec 14  1977]  ewrdls.9
+│   │   └── [Dec 14  1977]  ewrdls.qfasl
+│   ├── [Aug 25 14:29]  lmdoc
+│   │   ├── [Nov  9  1977]  eined.4
+│   │   ├── [Nov  6  1977]  eineid.10
+│   │   └── [Nov  7  1977]  eineid.11
+│   └── [Aug 25 14:29]  lmlrec
+│       ├── [Aug  5  1977]  ed.lrec
+│       ├── [Sep  2  1977]  ed1.lrec
+│       ├── [Sep  3  1977]  edd.lrec
+│       ├── [Sep 14  1977]  edm.lrec
+│       ├── [Aug  8  1977]  edt.lrec
+│       └── [Nov 28  1977]  eine.lrec
+├── [Aug 25 14:29]  7005039
+│   └── [Aug 25 14:29]  lmman
+│       └── [Jul 23  1978]  eine.7
+├── [Aug 26 11:37]  7007637
+│   ├── [Aug 26 11:39]  ar1.lispm
+│   │   ├── [Jan  3  1978]  _@.hair
+│   │   ├── [Nov 20  1977]  arch.60
+│   │   ├── [Jun 27  1977]  ddt.77
+│   │   ├── [Jun  5  1977]  ddtdoc.27
+│   │   ├── [Jun 23  1977]  ddttab.16
+│   │   ├── [Apr  9  1978]  displa.ops
+│   │   ├── [Aug  6  1977]  doc.7
+│   │   ├── [Mar 26  1977]  draw.1
+│   │   ├── [Nov 14  1976]  eddoc.6
+│   │   ├── [Aug 27  1977]  edf.69
+│   │   ├── [Feb 11  1978]  edm.136
+│   │   ├── [Jan 17  1978]  emouse.66
+│   │   ├── [Feb 22  1978]  ewindo.37
+│   │   ├── [Sep  7  1977]  mac.5
+│   │   ├── [Sep 10  1977]  mac.7
+│   │   ├── [Nov 27  1977]  mac2.7
+│   │   ├── [Nov 27  1977]  mac2.8
+│   │   ├── [Nov 27  1977]  mac2.qfasl
+│   │   ├── [Apr  7  1978]  nfile.13
+│   │   ├── [Mar 12  1978]  old.defmac
+│   │   ├── [Feb  9  1978]  oscree.14
+│   │   ├── [Feb 10  1978]  oscree.16
+│   │   ├── [Mar  1  1978]  pack4d.68
+│   │   ├── [Mar 31  1978]  simple.reader
+│   │   ├── [May 15  1978]  spline.53
+│   │   ├── [Apr 23  1978]  spline.answer
+│   │   ├── [May 15  1978]  spline.fasl
+│   │   └── [Nov 20  1977]  take6g.qfasl
+│   ├── [Aug 26 11:38]  arc.thesis
+│   │   ├── [Jan 15  1979]  just.225
+│   │   ├── [Jan 15  1979]  just.fasl
+│   │   ├── [Jan 21  1979]  th.64
+│   │   ├── [Jan 15  1979]  thinit.6
+│   │   └── [Jan 31  1979]  title.4
+│   └── [Aug 25 14:29]  dlw
+│       ├── [Jan 14  1979]  _eine.notes
+│       ├── [Jun 30  1978]  ar1.lispm
+│       ├── [Jul 19  1979]  arc.thesis
+│       ├── [Feb 18  1977]  ed.bugss
+│       ├── [Feb 21  1977]  ed1.405
+│       └── [Feb 22  1977]  ed1.411
+├── [Aug 25 14:29]  7007802
+│   └── [Aug 25 14:29]  lmdoc
+│       └── [Jan  8  1979]  bug.eine
+├── [Aug 25 14:29]  7007816
+│   └── [Aug 25 14:29]  eine
+│       ├── [Jun 24  1978]  basic.eine
+│       ├── [Dec 28  1978]  catlog.tags
+│       ├── [Dec 23  1978]  ecmd.qfasl
+│       ├── [Dec 21  1978]  edis.qfasl
+│       ├── [Dec 26  1978]  einser.qfasl
+│       ├── [Sep 15  1978]  epl1.qfasl
+│       ├── [Jan  4  1979]  escree.qfasl
+│       ├── [Oct 27  1978]  eutil.oqfasl
+│       ├── [Dec 26  1978]  eview.qfasl
+│       ├── [Dec 26  1978]  ewrdls.qfasl
+│       ├── [Dec 26  1978]  macro.qfasl
+│       └── [Dec 23  1978]  }save}.2
+├── [Aug 25 14:29]  7008446
+│   └── [Aug 25 14:29]  lmmaxq
+│       ├── [Apr 27  1981]  edbuf.qfasl
+│       ├── [Apr 27  1981]  edctl.qfasl
+│       ├── [Apr 27  1981]  edexp.qfasl
+│       ├── [Apr 27  1981]  edlm.qfasl
+│       └── [Apr 27  1981]  edmac.qfasl
+├── [Aug 26 09:49]  701362
+│   ├── [Aug 26 09:49]  ar1.lispm
+│   │   ├── [Jan  3  1978]  _@.hair
+│   │   ├── [Nov 20  1977]  arch.60
+│   │   ├── [Jun 27  1977]  ddt.77
+│   │   ├── [Jun  5  1977]  ddtdoc.27
+│   │   ├── [Jun 23  1977]  ddttab.16
+│   │   ├── [Apr  9  1978]  displa.ops
+│   │   ├── [Aug  6  1977]  doc.7
+│   │   ├── [Mar 26  1977]  draw.1
+│   │   ├── [Nov 14  1976]  eddoc.6
+│   │   ├── [Aug 27  1977]  edf.69
+│   │   ├── [Feb 11  1978]  edm.136
+│   │   ├── [Jan 17  1978]  emouse.66
+│   │   ├── [Feb 22  1978]  ewindo.37
+│   │   ├── [Sep  7  1977]  mac.5
+│   │   ├── [Sep 10  1977]  mac.7
+│   │   ├── [Nov 27  1977]  mac2.7
+│   │   ├── [Nov 27  1977]  mac2.8
+│   │   ├── [Nov 27  1977]  mac2.qfasl
+│   │   ├── [Apr  7  1978]  nfile.13
+│   │   ├── [Mar 12  1978]  old.defmac
+│   │   ├── [Feb  9  1978]  oscree.14
+│   │   ├── [Feb 10  1978]  oscree.16
+│   │   ├── [Mar  1  1978]  pack4d.68
+│   │   ├── [Mar 31  1978]  simple.reader
+│   │   ├── [May 15  1978]  spline.53
+│   │   ├── [Apr 23  1978]  spline.answer
+│   │   ├── [May 15  1978]  spline.fasl
+│   │   └── [Nov 20  1977]  take6g.qfasl
+│   └── [Aug 25 14:29]  dlw
+│       ├── [Aug  7  1978]  _eine.bugs
+│       ├── [Jul 21  1978]  _eine.lnotes
+│       ├── [Oct  8  1978]  _eine.notes
+│       └── [Jun 30  1978]  ar1.lispm
+├── [Aug 26 09:44]  701419
+│   ├── [Aug 26 09:44]  arc.thesis
+│   │   ├── [Jan 15  1979]  just.225
+│   │   ├── [Jan 15  1979]  just.fasl
+│   │   ├── [Jan 21  1979]  th.64
+│   │   ├── [Jan 15  1979]  thinit.6
+│   │   └── [Jan 31  1979]  title.4
+│   └── [Aug 25 14:29]  dlw
+│       └── [Jul 19  1979]  arc.thesis
+├── [Aug 26 09:33]  9004365
+│   ├── [Aug 26 09:33]  ar1.lispm
+│   │   ├── [Jun 27  1977]  ddt.77
+│   │   ├── [Jun  5  1977]  ddtdoc.27
+│   │   ├── [Jun 23  1977]  ddttab.16
+│   │   ├── [Aug  6  1977]  doc.7
+│   │   ├── [Mar 26  1977]  draw.1
+│   │   └── [Aug 27  1977]  edf.69
+│   ├── [Aug 25 14:29]  dlw
+│   │   ├── [Sep 20  1977]  ar1.lispm
+│   │   ├── [Dec 15  1977]  edfn.@xgp
+│   │   ├── [Dec 15  1977]  edfnrs.1
+│   │   ├── [Dec 15  1977]  edfnrs.2
+│   │   ├── [Aug 30  1977]  edmum.6
+│   │   ├── [Aug 10  1977]  edstkg.1
+│   │   ├── [Sep 27  1977]  eine.7
+│   │   └── [Oct 20  1977]  eine.8
+│   └── [Aug 25 14:29]  dlw2
+│       ├── [Dec  1  1977]  ebasic.60
+│       ├── [Dec  6  1977]  ebasic.61
+│       ├── [Dec 10  1977]  ebasic.64
+│       ├── [Nov 19  1977]  ecmd.48
+│       ├── [Nov 30  1977]  ecmd.49
+│       ├── [Dec 10  1977]  ecmd.50
+│       ├── [Nov 30  1977]  edefs.42
+│       ├── [Nov 30  1977]  edefs.43
+│       ├── [Dec 10  1977]  edefs.48
+│       ├── [Dec 10  1977]  edefs.49
+│       ├── [Dec 10  1977]  edefs.50
+│       ├── [Nov 17  1977]  edfn.112
+│       ├── [Nov 30  1977]  edfn.113
+│       ├── [Dec 10  1977]  edfn.45
+│       ├── [Dec 10  1977]  edfn.46
+│       ├── [Dec  3  1977]  edfn2.13
+│       ├── [Dec  3  1977]  edfn2.14
+│       ├── [Nov 15  1977]  edis.15
+│       ├── [Nov 17  1977]  edis.16
+│       ├── [Dec  7  1977]  edis.29
+│       ├── [Nov 16  1977]  edm.115
+│       ├── [Nov 22  1977]  edm.122
+│       ├── [Oct 30  1977]  edt.82
+│       ├── [Nov  7  1977]  edt.84
+│       ├── [Nov 27  1977]  edtags.10
+│       ├── [Dec 10  1977]  edtags.11
+│       ├── [Nov 16  1977]  edtags.9
+│       ├── [Dec  1  1977]  efile.32
+│       ├── [Dec  3  1977]  efile.35
+│       ├── [Dec 10  1977]  efile.40
+│       ├── [Dec 10  1977]  efile.42
+│       ├── [Nov 11  1977]  efont.13
+│       ├── [Nov 16  1977]  efont.14
+│       ├── [Nov  1  1977]  einser.10
+│       ├── [Nov  7  1977]  einser.11
+│       ├── [Oct 25  1977]  emove.11
+│       ├── [Nov  1  1977]  emove.12
+│       ├── [Nov 19  1977]  erand.29
+│       ├── [Dec  3  1977]  erand.30
+│       ├── [Dec  7  1977]  erand.31
+│       ├── [Nov  3  1977]  esearc.40
+│       ├── [Nov 16  1977]  esearc.41
+│       ├── [Nov 26  1977]  espac.18
+│       ├── [Nov 27  1977]  espac.19
+│       ├── [Dec  7  1977]  espac.20
+│       ├── [Nov 26  1977]  etable.30
+│       ├── [Nov 30  1977]  etable.32
+│       ├── [Dec  8  1977]  etable.34
+│       ├── [Nov 27  1977]  eutil.47
+│       ├── [Dec  3  1977]  eutil.48
+│       ├── [Dec 10  1977]  eutil.49
+│       ├── [Nov 27  1977]  ewindo.26
+│       ├── [Nov 30  1977]  ewindo.28
+│       ├── [Dec 10  1977]  ewindo.31
+│       ├── [Dec 10  1977]  ewindo.32
+│       ├── [Nov  1  1977]  ewrdls.7
+│       └── [Nov  4  1977]  ewrdls.8
+├── [Aug 25 16:58]  ai_ka_arch_3of9_2812_16_21_may_1981
+│   ├── [Aug 25 17:00]  arc.thesis
+│   │   ├── [Jan 15  1979]  just.225
+│   │   ├── [Jan 15  1979]  just.fasl
+│   │   ├── [Jan 21  1979]  th.64
+│   │   ├── [Jan 24  1981]  th.log
+│   │   ├── [Jan 15  1979]  thinit.6
+│   │   └── [Jan 31  1979]  title.4
+│   └── [Aug 25 14:29]  dlw
+│       └── [Jan 24  1981]  arc.thesis
+├── [Aug 26 09:30]  ai_ka_arch_3of9_3054_59_26_aug_1982
+│   ├── [Aug 26 09:31]  arc.thesis
+│   │   ├── [Jan 15  1979]  just.225
+│   │   ├── [Jan 15  1979]  just.fasl
+│   │   ├── [Jan 21  1979]  th.64
+│   │   ├── [Jan 24  1981]  th.log
+│   │   ├── [Jan 15  1979]  thinit.6
+│   │   └── [Jan 31  1979]  title.4
+│   └── [Aug 25 14:29]  dlw
+│       └── [Jan 24  1981]  arc.thesis
+├── [Aug 25 14:29]  mit3
+│   └── [Aug 25 14:29]  lmdoc
+│       ├── [Mar 11  1979]  bug.eine
+│       ├── [Nov 14  1976]  eddoc.6
+│       ├── [Sep 10  1977]  edfnd.11
+│       ├── [Nov  9  1977]  eined.5
+│       └── [Mar 31  1978]  eineid.14
+└── [Aug 25 14:29]  mit4
+    └── [Aug 25 14:29]  lmman
+        └── [Sep  6  1978]  eine.8
+
+38 directories, 238 files

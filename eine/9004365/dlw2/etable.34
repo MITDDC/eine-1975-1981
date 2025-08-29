@@ -1,0 +1,783 @@
+;;; This file is part of EINE, the Lisp Machine editor.        -*-LISP-*-
+;;; For more information see LISPM2;EINE INFO.
+
+;; This file contains functions for setting up tables, and the data to
+;;    put in the tables.  These include the command dispatch tables, and
+;;    the syntax tables.
+
+(DECLARE (SETQ RETAIN-VARIABLE-NAMES-SWITCH 'ARGS))
+(DECLARE (SETQ OPEN-CODE-MAP-SWITCH T))
+
+ ;;;;    FUNCTION TO SET UP THE COMMAND DISPATCH TABLE:
+
+; The table is set up from a list of four elements, called rows: one for each
+; setting of the buckey bits, as follows: 0 = none, 1 = control, 2 = meta, 3 = control-meta.
+; Each row is walked down, and as each element is reached, it is stored in the array, unless
+; its car is recognized as a special function.
+; Currently implemented special functions are:
+;     (*REPEAT <times> <thing) --  <thing> is stored <times> times.
+;     (*REPEAT-EVAL <times> <thing>) -- like *REPEAT except that <thing> gets EVALed
+;                              before being stored.  The special variable ED-RPCNT will
+;                              be set to 0 on the first iteration and incremented by 1
+;                              throughout, like a MIDAS repeat loop.
+
+
+(DEFUN ED-SETUP-DISPATCH-TABLE (TABLE LISTS &AUX ENTRY TEM)
+   (DO ((LISTS1 LISTS (CDR LISTS1))
+	(IDX1 0 (1+ IDX1)))
+       ((NULL LISTS1))
+     (DO ((LIST (CAR LISTS1) (CDR LIST))
+	  (IDX2 0))				  ;THE AMOUNT THIS IS INCREMENTED DEPENDS!!
+	 ((NULL LIST) (COND ((NEQ IDX2 220)
+			     (MAPC (FUNCTION PRINC)
+				   (LIST "ROW WRONG SIZE: "
+					 IDX1 " " IDX2 " --- ED-SETUP-DISPATCH-TABLE"))
+			     (TERPRI))))
+       (SETQ ENTRY (CAR LIST))
+       (COND ((ATOM ENTRY)
+	      (AS-2 ENTRY TABLE IDX1 IDX2)
+	      (SETQ IDX2 (1+ IDX2)))
+	     ((EQ (FIRST ENTRY) '*REPEAT)
+	      (SETQ TEM (SECOND ENTRY))
+	      (SETQ ENTRY (THIRD ENTRY))
+	      (DO I 0 (1+ I) (= I TEM)
+		(AS-2 ENTRY TABLE IDX1 IDX2)
+		(SETQ IDX2 (1+ IDX2))))
+	     ((EQ (FIRST ENTRY) '*REPEAT-EVAL)
+	      (SETQ TEM (SECOND ENTRY))
+	      (SETQ ENTRY (THIRD ENTRY))
+	      (DO ED-RPCNT 0 (1+ ED-RPCNT) (= ED-RPCNT TEM)
+		(AS-2 (EVAL ENTRY) TABLE IDX1 IDX2)
+		(SETQ IDX2 (1+ IDX2))))
+	     ((EQ (FIRST ENTRY) '*EVAL)
+	      (AS-2 (EVAL (SECOND ENTRY)) TABLE IDX1 IDX2)
+	      (SETQ IDX2 (1+ IDX2)))
+	     (T
+	      (AS-2 ENTRY TABLE IDX1 IDX2)
+	      (SETQ IDX2 (1+ IDX2)))))))
+		  
+
+;;; The initial command dispatch table:                    [I]
+
+; Note convention:  don't touch the "." key, it is reserved for the user.
+
+(SETQ ED-INITIAL-COMMAND-DISPATCH-TABLE '(
+   (		   ; UNSHIFTED CHARACTERS
+      (*REPEAT 200 ED-COM-SELF-INSERT)	    ; ALL PRINTING CHARACTERS.
+      (*REPEAT 7 NIL)			    ; RANDOM...
+      ED-COM-RUBOUT			    ; RUBOUT.
+      ED-COM-SELF-INSERT		    ; BACKSPACE
+      ED-COM-INDENT-FOR-LISP		    ; TAB
+      ED-COM-INDENT-NEW-LINE		    ; LINEFEED
+      NIL				    ; VT
+      ED-COM-COMPLETE-REDISPLAY		    ; FORM FEED
+      ED-COM-INSERT-CRS                     ; CARRIAGE RETURN
+      (*REPEAT 2 NIL)			    ; UNUSED CODES
+      )
+
+; ----- Main dispatch table - CONTROL keys: [C]
+   (
+      NIL		      ;000  ???
+      ED-COM-DOWN-REAL-LINE   ;001 down arrow
+      NIL		      ;002 alpha   **MAGIC**
+      NIL		      ;003 beta    **MAGIC**
+      NIL		      ;004 circumflex (and)
+      NIL		      ;005 not-sign
+      NIL		      ;006 epsilon **MAGIC**
+      NIL		      ;007 pi
+      NIL		      ;010 lambda
+      NIL		      ;011 gamma???
+      NIL		      ;012 delta???
+      ED-COM-UP-REAL-LINE     ;013 uparrow
+      NIL		      ;014 plus-minus???
+      NIL		      ;015 circle-plus???
+      NIL		      ;016 infinity
+      NIL		      ;017 partial delta
+      NIL		      ;020 left horseshoe
+      NIL		      ;021 right horseshoe
+      NIL		      ;022 up horseshoe
+      NIL		      ;023 down horseshoe
+      NIL		      ;024 universal quantifier
+      NIL		      ;025 existential quantifier
+      NIL		      ;026 circle-cross
+      NIL		      ;027 double-arrow
+      ED-COM-BACKWARD	      ;030 left arrow
+      ED-COM-FORWARD	      ;031 right arrow
+      NIL		      ;032 not-equals
+      NIL		      ;033 diamond (alt)
+      NIL		      ;034 less-or-equal
+      NIL		      ;035 greater-or-equal
+      NIL		      ;036 equivalence
+      NIL		      ;037 or
+      ED-COM-SET-POP-MARK     ;040 space
+      (*REPEAT 7 NIL)	      ; !"#$%&'              "
+      ED-COM-MARK-BOB	      ;(
+      ED-COM-MARK-EOB         ;)
+      (*REPEAT 3 NIL)	      ;*+,
+      ED-COM-NEGATE-NUMERIC-ARG ;-
+      NIL		      ;. is reserved for users!!
+      ED-COM-SELF-DOCUMENT    ;/
+
+      (*REPEAT 12 ED-COM-NUMBERS)     ;digits
+      (*REPEAT 2 NIL)	      ;:;
+
+      ED-COM-MARK-BOB	      ;<
+      ED-COM-PRINT-HPOS	      ;=
+      ED-COM-MARK-EOB	      ;>
+      ED-COM-SELF-DOCUMENT    ;?
+      ED-COM-SET-POP-MARK     ;@
+      ED-COM-BOL	      ;A
+      ED-COM-BACKWARD	      ;B
+      NIL		      ;C EMACS EQUIVALENT IS USELESS
+      ED-COM-DELETE-FORWARD   ;D
+      ED-COM-EOL	      ;E
+      ED-COM-FORWARD	      ;F
+      ED-COM-BEEP             ;G
+      ED-COM-BACKWARD	      ;H
+      NIL		      ;I "tab"
+      ED-COM-CHANGE-DEFAULT-FONT  ;J
+      ED-COM-KILL	      ;K
+      ED-COM-COMPLETE-REDISPLAY   ;L
+      NIL		      ;M RESERVED FOR EDT!!! DO NOT TOUCH!!!
+      ED-COM-DOWN-REAL-LINE   ;N
+      ED-COM-MAKE-ROOM	      ;O
+      ED-COM-UP-REAL-LINE     ;P
+      ED-COM-QUOTED-INSERT    ;Q
+      NIL		      ;R ===
+      ED-COM-CHAR-SEARCH      ;S ===
+      NIL		      ;T Really undefined in EMACS!
+      ED-COM-QUADRUPLE-NUMERIC-ARG    ;U
+      ED-COM-NEXT-SCREEN      ;V
+      ED-COM-KILL-REGION      ;W
+      (*EVAL (FSET 'ED-COM-CONTROL-X-PREFIX
+		    (ED-MAKE-PREFIX-CHAR ED-CONTROL-X-DISPATCH-TABLE)))
+      ED-COM-YANK             ;Y
+      ED-COM-QUIT	      ;Z
+      (*REPEAT 6 NIL)	      ;[\]^_`
+      (*REPEAT-EVAL 32 (LIST 1 (+ 101 ED-RPCNT)))      ;MAP LOWER CASE INTO UPPER CASE
+      (*REPEAT 5 NIL)	      ;{|}~integral    |
+      (*REPEAT 12 NIL) 
+      ED-COM-SELECT-BUFFER    ;LINE 
+      NIL		      ;TAB 
+      NIL		      ;FORM 
+      NIL		      ;RETURN -- RESERVED FOR EDITOR TOP LEVEL
+      (*REPEAT 2 NIL))	      ;UNUSED CODES
+;DROPS THROUGH
+
+
+;DROPS IN
+; ----- Main dispatch table - META keys:  [M]
+   (
+      (*REPEAT 40 NIL)	      ;sail
+      (*REPEAT 10 NIL)
+      ED-COM-BACKWARD-SENTENCE;(
+      ED-COM-FORWARD-SENTENCE ;)
+      (*REPEAT 3 NIL)
+      ED-COM-NEGATE-NUMERIC-ARG ;-
+      ED-COM-EDIT-DEFINITION  ;.
+      ED-COM-SELF-DOCUMENT    ;/
+
+      (*REPEAT 12 ED-COM-NUMBERS)
+
+      NIL		      ;:
+      NIL		      ;;
+
+      ED-COM-GOTO-BEGINNING   ;<
+      ED-COM-COUNT-LINES-REGION	      ;=
+      ED-COM-GOTO-END	      ;>
+      ED-COM-SELF-DOCUMENT    ;?
+      ED-COM-MARK-WORD	      ;@
+      NIL		      ;A  ED-COM-BACKWARD-SENTENCE
+      ED-COM-BACKWARD-WORD    ;B
+      ED-COM-UPPERCASE-INITIAL	      ;C
+      ED-COM-KILL-WORD	      ;D
+      NIL		      ;E  FORWARD SENTENCE
+      ED-COM-FORWARD-WORD     ;F
+      ED-COM-BEEP             ;G
+      NIL		      ;H  ED-MARK-PARAGRAPH
+      NIL		      ;I  ED-COM-TAB-TO-TAB-STOP
+      ED-COM-CHANGE-FONT-WORD ;J
+      ED-COM-KILL-WORD	      ;K
+      ED-COM-LOWERCASE-WORD   ;L
+      ED-COM-BACK-TO-INDENTATION      ;M
+      NIL                     ;N  NOT USED BY EMACS
+      NIL		      ;O  ED-COM-MAKE-BLANK-FONT-BEFORE
+      NIL         	      ;P  UNUSED BY EMACS
+      NIL		      ;Q (FILL PARAGRAPH)
+      ED-COM-MOVE-TO-SCREEN-EDGE      ;R
+      NIL		      ;S  ED-COM-CENTER-LINE?
+      ED-COM-MARK-WORD	      ;T
+      ED-COM-UPPERCASE-WORD   ;U
+      ED-COM-PREVIOUS-SCREEN  ;V
+      ED-COM-SAVE-REGION      ;W
+      ED-COM-EXTENDED-COMMAND ;X
+      ED-COM-YANK-POP	      ;Y
+      ED-COM-EVAL-BUFFER-AND-COMPILE-AND-EXIT	;Z
+      ED-COM-BACKWARD-PARAGRAPH         ;[
+      ED-COM-DELETE-HORIZONTAL-SPACE	;\
+      ED-COM-FORWARD-PARAGRAPH	        ;]
+      ED-COM-DELETE-INDENTATION		;^
+      (*REPEAT 2 NIL)
+      (*REPEAT-EVAL 32 (LIST 2 (+ 101 ED-RPCNT)))      ;MAP LOWER CASE INTO UPPER CASE
+      (*REPEAT 5 NIL)
+;blue keys
+      (*REPEAT 7 NIL)
+      ED-COM-BACKWARD-KILL-WORD	      ;rubout
+      NIL
+      ED-COM-STUPID-TAB
+      ED-COM-RENAME-BUFFER    ;line
+      (*REPEAT 2 NIL)	      ;vt, form
+      ED-COM-BACK-TO-INDENTATION      ;return
+      (*REPEAT 2 NIL))
+
+; ----- Main dispatch table - CONTROL-META keys: [CM]
+
+   (
+      (*REPEAT 40 NIL)
+      (*REPEAT 10 NIL)
+      ED-COM-BACKWARD-UP-LIST  ;(
+      ED-COM-FORWARD-UP-LIST  ;)
+      (*REPEAT 3 NIL)
+      ED-COM-NEGATE-NUMERIC-ARG ;-
+      (*REPEAT 2 NIL)
+      (*REPEAT 12 ED-COM-NUMBERS)
+      (*REPEAT 2 NIL)
+
+      NIL		      ;<
+      NIL		      ;=
+      NIL		      ;>
+      NIL		      ;?
+      ED-COM-MARK-SEXP	      ;@
+      ED-COM-BEGINNING-OF-DEFUN	      ;A
+      ED-COM-BACKWARD-SEXP    ;B
+      NIL		      ;C
+      NIL		      ;D
+      ED-COM-END-OF-DEFUN     ;E
+      ED-COM-FORWARD-SEXP     ;F
+      ED-COM-FORMAT-CODE      ;G
+      ED-COM-MARK-DEFUN	      ;H
+      NIL		      ;I
+      ED-COM-CHANGE-FONT-REGION	      ;J
+      ED-COM-KILL-SEXP	      ;K
+      NIL		      ;L
+      ED-COM-BACK-TO-INDENTATION   ;M
+      ED-COM-FORWARD-LIST     ;N
+      ED-COM-SPLIT-LINE	      ;O
+      ED-COM-BACKWARD-LIST    ;P
+      ED-COM-INDENT-SEXP      ;Q
+      ED-COM-MOVE-TO-SCREEN-EDGE      ;R
+      ED-COM-INCREMENTAL-SEARCH   ;S
+      ED-COM-MARK-SEXP	      ;T
+      ED-COM-BACKWARD-UP-LIST ;U
+      NIL		      ;V Not used in EMACS.
+      ED-COM-APPEND-NEXT-KILL ;W
+      NIL		      ;X No analogy.
+      NIL		      ;Y Not used in EMACS.
+      ED-COM-EVAL-BUFFER-AND-EXIT      ;Z
+      ED-COM-BEGINNING-OF-DEFUN	      ;[
+      NIL		      ;\ Indent region.
+      ED-COM-END-OF-DEFUN     ;]
+      ED-COM-DELETE-INDENTATION ;^
+      (*REPEAT 2 NIL)
+      (*REPEAT-EVAL 32 (LIST 3 (+ 101 ED-RPCNT)))      ;MAP LOWER CASE INTO UPPER CASE
+      (*REPEAT 5 NIL)
+      (*REPEAT 7 NIL)
+      ED-COM-BACKWARD-KILL-SEXP	      ;rubout
+      (*REPEAT 2 NIL)
+      ED-COM-CREATE-BUFFER    ;line
+      (*REPEAT 2 NIL)
+      ED-COM-BACK-TO-INDENTATION      ;return
+      (*REPEAT 2 NIL))
+   ))
+ 
+
+(SETQ ED-INITIAL-CONTROL-X-DISPATCH-TABLE '(
+
+
+; ----- Control-X dispatch table - UNSHIFTED keys:  [^X]
+     (
+      (*REPEAT 40 NIL)
+      (*REPEAT 10 NIL)
+      NIL		      ;(
+      NIL		      ;)
+      (*REPEAT 6 NIL)
+      NIL		      ;0
+      ED-COM-ONE-WINDOW	      ;1
+      ED-COM-TWO-WINDOWS      ;2
+      (*REPEAT 7 NIL)	      ;rest of the digits
+      (*REPEAT 2 NIL)
+
+      NIL		      ;<
+      NIL		      ;=
+      NIL		      ;>
+      NIL		      ;?
+      NIL		      ;@
+      NIL		      ;A
+      ED-COM-SELECT-BUFFER    ;B
+      NIL		      ;C
+      NIL		      ;D
+      NIL		      ;E
+      NIL		      ;F
+      NIL		      ;G
+      NIL		      ;H
+      NIL		      ;I
+      NIL		      ;J
+      ED-COM-KILL-BUFFER      ;K
+      NIL		      ;L
+      NIL		      ;M
+      NIL		      ;N
+      ED-COM-OTHER-WINDOW     ;O
+      NIL		      ;P
+      NIL		      ;Q
+      NIL		      ;R
+      NIL		      ;S
+      ED-COM-EXCHANGE-CHARS   ;T
+      NIL		      ;U
+      NIL		      ;V
+      NIL		      ;W
+      NIL		      ;X
+      NIL		      ;Y
+      NIL		      ;Z
+      (*REPEAT 6 NIL)
+      (*REPEAT-EVAL 32 (LIST 0 (+ 101 ED-RPCNT)))      ;MAP LOWER CASE INTO UPPER CASE
+      (*REPEAT 5 NIL)
+      (*REPEAT 7 NIL)
+      NIL
+      (*REPEAT 5 NIL)
+      NIL
+      (*REPEAT 2 NIL))
+
+; ----- Control-X dispatch table - CONTROL keys:  [^XC]
+
+     (
+      (*REPEAT 40 NIL)
+      (*REPEAT 10 NIL)
+      NIL  ;(
+      NIL  ;)
+      (*REPEAT 6 NIL)
+      (*REPEAT 12 NIL)
+      (*REPEAT 2 NIL)
+
+      NIL		      ;<
+      NIL		      ;=
+      NIL		      ;>
+      NIL		      ;?
+      NIL		      ;@
+      NIL		      ;A
+      ED-COM-LIST-BUFFERS     ;B
+      ED-COM-QUIT	      ;C
+      NIL		      ;D
+      NIL		      ;E
+      NIL		      ;F
+      ED-COM-PREFIX-BEEP      ;G
+      NIL		      ;H
+      NIL		      ;I
+      ED-COM-CHANGE-DEFAULT-FONT      ;J
+      NIL		      ;K
+      ED-COM-LOWERCASE-REGION ;L
+      NIL		      ;M
+      ED-COM-SET-GOAL-COLUMN  ;N
+      ED-COM-DELETE-BLANK-LINES	      ;O
+      NIL		      ;P
+      NIL		      ;Q
+      ED-COM-READ-FROM-FILE   ;R
+      ED-COM-SAVE-BUFFER      ;S
+      NIL		      ;T
+      ED-COM-UPPERCASE-REGION ;U
+      NIL		      ;V
+      ED-COM-WRITE-TO-FILE    ;W
+      ED-COM-SWAP-POINT-AND-MARK ;X
+      NIL		      ;Y
+      ED-COM-EDIT-DEFINITION  ;Z
+      (*REPEAT 6 NIL)
+      (*REPEAT-EVAL 32 (LIST 1 (+ 101 ED-RPCNT)))      ;MAP LOWER CASE INTO UPPER CASE
+      (*REPEAT 5 NIL)
+      (*REPEAT 7 NIL)
+      NIL
+      (*REPEAT 5 NIL)
+      NIL
+      (*REPEAT 2 NIL))
+
+; ----- Control-X dispatch table - META keys:   [^XM]
+     (
+      (*REPEAT 40 NIL)
+      (*REPEAT 10 NIL)
+      NIL		      ;(
+      NIL		      ;)
+      (*REPEAT 6 NIL)
+      (*REPEAT 12 NIL)	      ;digits
+      (*REPEAT 2 NIL)
+
+      NIL		      ;<
+      NIL		      ;=
+      NIL		      ;>
+      NIL		      ;?
+      NIL		      ;@
+      NIL		      ;A
+      NIL		      ;B
+      NIL		      ;C
+      NIL		      ;D
+      NIL		      ;E
+      NIL		      ;F
+      NIL		      ;G
+      NIL		      ;H
+      NIL		      ;I
+      NIL		      ;J
+      NIL		      ;K
+      NIL		      ;L
+      NIL		      ;M
+      NIL		      ;N
+      NIL		      ;O
+      NIL		      ;P
+      NIL		      ;Q
+      NIL		      ;R
+      NIL		      ;S
+      NIL		      ;T
+      NIL		      ;U
+      NIL		      ;V
+      NIL		      ;W
+      NIL		      ;X
+      NIL		      ;Y
+      NIL		      ;Z
+      (*REPEAT 6 NIL)
+      (*REPEAT-EVAL 32 (LIST 2 (+ 101 ED-RPCNT)))      ;MAP LOWER CASE INTO UPPER CASE
+      (*REPEAT 5 NIL)
+      (*REPEAT 7 NIL)
+      NIL
+      (*REPEAT 5 NIL)
+      NIL
+      (*REPEAT 2 NIL))
+
+; ----- Control-X dispatch table - CONTROL-META keys:   [^XCM]
+
+     (
+      (*REPEAT 40 NIL)
+      (*REPEAT 10 NIL)
+      NIL		      ;(
+      NIL		      ;)
+      (*REPEAT 6 NIL)
+      (*REPEAT 12 NIL)	      ;digits
+      (*REPEAT 2 NIL)
+
+      NIL		      ;<
+      NIL		      ;=
+      NIL		      ;>
+      NIL		      ;?
+      NIL		      ;@
+      NIL		      ;A
+      NIL		      ;B
+      NIL		      ;C
+      NIL		      ;D
+      NIL		      ;E
+      NIL		      ;F
+      NIL		      ;G
+      NIL		      ;H
+      NIL		      ;I
+      NIL		      ;J
+      NIL		      ;K
+      NIL		      ;L
+      NIL		      ;M
+      NIL		      ;N
+      NIL		      ;O
+      NIL		      ;P
+      NIL		      ;Q
+      NIL		      ;R
+      NIL		      ;S
+      NIL		      ;T
+      NIL		      ;U
+      NIL		      ;V
+      NIL		      ;W
+      NIL		      ;X
+      NIL		      ;Y
+      NIL		      ;Z
+      (*REPEAT 6 NIL)
+      (*REPEAT-EVAL 32 (LIST 3 (+ 101 ED-RPCNT)))      ;MAP LOWER CASE INTO UPPER CASE
+      (*REPEAT 5 NIL)
+      (*REPEAT 7 NIL)
+      NIL
+      (*REPEAT 5 NIL)
+      NIL
+      (*REPEAT 2 NIL))
+     ))
+
+; The EXTENDED COMMAND assoc-list. 
+(SETQ ED-EXTENDED-COMMAND-ALIST '(
+;	   ("ADD FUNCTION TO BUFFER" . ED-COM-ADD-FUNCTION-TO-BUFFER)
+	   ("ADJUST WINDOW SIZE" . ED-COM-ADJUST-WINDOW-SIZE)
+	   ("ARGLIST" . ED-COM-ARGLIST)
+	   ("BARFOLA" . ED-COM-BARFOLA)
+	   ("BURY WINDOW" . ED-COM-BURY-WINDOW)
+	   ("COMPILE BUFFER" . ED-COM-EVAL-BUFFER-AND-COMPILE)
+	   ("COMPILE REGION" . ED-COM-EVAL-REGION-AND-COMPILE)
+	   ("CREATE BUFFER" . ED-COM-CREATE-BUFFER)
+	   ("CREATE TAB BUFFER" . ED-COM-CREATE-TAB-BUFFER)
+	   ("DEFINE WINDOW" . ED-COM-DEFINE-WINDOW)
+	   ("EDIT DEFINITION" . ED-COM-EDIT-DEFINITION)
+	   ("EDIT TAB BUFFER" . ED-COM-EDIT-TAB-BUFFER)
+	   ("ENTER TEMP AREA MODE" . ED-COM-ENTER-TEMP-AREA)
+	   ("EVALUATE BUFFER" . ED-COM-EVAL-BUFFER)
+	   ("EVALUATE REGION" . ED-COM-EVAL-REGION)
+	   ("EXIT TEMP AREA MODE" . ED-COM-EXIT-TEMP-AREA)
+	   ("FLASH OFF" . ED-COM-FLASH-OFF)
+	   ("FLASH ON" . ED-COM-FLASH-ON)
+	   ("FORGET ALL FILES" . ED-COM-FORGET-ALL-FILES)
+	   ("FORGET FILE" . ED-COM-FORGET-FILE)
+	   ("GRIND DEFINITION" . ED-COM-GRIND-DEFINITION)
+	   ("GRIND S-EXPRESSION" . ED-COM-GRIND-S-EXPRESSION)
+	   ("IBEAM BLINKER" . ED-COM-IBEAM-BLINKER)
+	   ("INSERT FILE" . ED-COM-INSERT-FILE)
+	   ("INSTALL COMMAND" . ED-COM-INSTALL-COMMAND)
+	   ("KILL ALL BUFFERS" . ED-COM-KILL-ALL-BUFFERS)
+	   ("KILL BUFFER" . ED-COM-KILL-BUFFER)
+	   ("KILL WINDOW" . ED-COM-KILL-WINDOW)
+	   ("LIST BUFFERS" . ED-COM-LIST-BUFFERS)
+	   ("LIST FILES" . ED-COM-PRINT-FILE-LIST)
+	   ("LIST FUNCTIONS" . ED-COM-LIST-FUNCTIONS-IN-FILE)
+	   ("LOAD WHOLE FILE" . ED-COM-LOAD-WHOLE-FILE)
+	   ("MARK INVISIBLE" . ED-COM-MARK-INVISIBLE)
+	   ("MARK REVERSE VIDEO" . ED-COM-MARK-REVERSE-VIDEO)
+	   ("MARK UNDERLINE" . ED-COM-MARK-UNDERLINE)
+	   ("MOUSE OFF" . ED-COM-MOUSE-OFF)
+	   ("MOUSE ON" . ED-COM-MOUSE-ON)
+	   ("MOVE WINDOW" . ED-COM-MOVE-WINDOW)
+	   ("READ TAG TABLE" . ED-COM-READ-TAG-TABLE)
+	   ("RECTANGULAR BLINKER" . ED-COM-RECTANGULAR-BLINKER)
+	   ("REDEFINE FONTS" . ED-COM-REDEFINE-FONTS)
+	   ("RENAME BUFFER" . ED-COM-RENAME-BUFFER)
+	   ("REVERT BUFFER" . ED-COM-REVERT-BUFFER)
+	   ("SAVE ALL FILES" . ED-COM-UPDATE-ALL-FILES)
+	   ("SAVE BUFFER" . ED-COM-SAVE-BUFFER)
+	   ("SELECT BUFFER" . ED-COM-SELECT-BUFFER)
+	   ("SELECT TAB BUFFER" . ED-COM-SELECT-TAB-BUFFER)
+	   ("SET FONTS" . ED-COM-REDEFINE-FONTS)
+	   ("TABLET OFF" . ED-COM-MOUSE-OFF)
+	   ("TABLET ON" . ED-COM-TABLET-ON)
+	   ("UPDATE ALL FILES" . ED-COM-UPDATE-ALL-FILES)
+	   ("UPDATE FILE" . ED-COM-UPDATE-FILE)
+	   ("WRITE REGION" . ED-COM-WRITE-REGION)
+	   ("ZOWIE" . ED-COM-ZOWIE)
+	   ))
+;[X]Q
+;Innermost dimension is the button number. (The 3rd index)
+; Then, the number of times pushed. (The 2nd index)
+; Finally, the region on the screen. (The 1st index)
+(SETQ ED-INITIAL-MOUSE-DISPATCH-TABLE
+      '( ( (EDM-MARK-REGION EDM-MARK-LIST EDM-MARK-SEXP)	;TEXT (single click)
+	   (EDM-MOVE-REGION EDM-YANK EDM-KILL)			;     (double click)
+	   (NIL EDM-YANK-OTHER EDM-SAVE))			;     (triple click)
+	 ( (EDM-SHOW-LINE-AT-TOP EDM-MARK-LINE-LIST EDM-MARK-LINE) ;LINE (single click)
+	  (EDM-SHOW-LINE-AT-BOTTOM EDM-YANK EDM-KILL)		;        (double click)
+	   (NIL EDM-YANK-OTHER EDM-SAVE))			;        (triple click)
+	 ( (EDM-SCROLL-FAST EDM-MARK-DEFUN EDM-MARK-PARAGRAPH)	;PARAGRAPH (single click)
+	   (NIL EDM-YANK EDM-KILL)				;          (double click)
+	   (NIL EDM-YANK-OTHER EDM-SAVE))))			;          (triple click)
+
+; ----- This is a prototype for making new dispatch tables.
+
+(COMMENT PROTOTYPE DISPATCH TABLE SEGMENMT
+(			     ;UNSHIFTED CHARACTERS
+      (*REPEAT 40 NIL)
+      (*REPEAT 10 NIL)
+      NIL		      ;(
+      NIL		      ;)
+      (*REPEAT 6 NIL)
+      (*REPEAT 12 NIL)	      ;digits
+      (*REPEAT 2 NIL)
+
+      NIL		      ;<
+      NIL		      ;=
+      NIL		      ;>
+      NIL		      ;?
+      NIL		      ;@
+      NIL		      ;A
+      NIL		      ;B
+      NIL		      ;C
+      NIL		      ;D
+      NIL		      ;E
+      NIL		      ;F
+      NIL		      ;G
+      NIL		      ;H
+      NIL		      ;I
+      NIL		      ;J
+      NIL		      ;K
+      NIL		      ;L
+      NIL		      ;M
+      NIL		      ;N
+      NIL		      ;O
+      NIL		      ;P
+      NIL		      ;Q
+      NIL		      ;R
+      NIL		      ;S
+      NIL		      ;T
+      NIL		      ;U
+      NIL		      ;V
+      NIL		      ;W
+      NIL		      ;X
+      NIL		      ;Y
+      NIL		      ;Z
+      (*REPEAT 6 NIL)
+      (*REPEAT-EVAL 32 (LIST 3 (+ 101 ED-RPCNT)))      ;MAP LOWER CASE INTO UPPER CASE
+      (*REPEAT 5 NIL)
+      (*REPEAT 7 NIL)
+      NIL
+      (*REPEAT 5 NIL)
+      NIL
+      (*REPEAT 2 NIL))
+  ) ;END OF PROTOTYPE
+
+(COMMENT SYNTAX TABLES)
+
+(DEFUN ED-SETUP-TABLE (ARRAY LIST &AUX I E LIMIT)
+    (SETQ I 0)
+    (DO LIST LIST (CDR LIST) (NULL LIST)
+      (SETQ E (CAR LIST))
+      (COND ((ATOM E)
+	     (AS-1 (SYMEVAL E) ARRAY I)
+	     (SETQ I (1+ I)))
+	    ((EQ (CAR E) '*REPEAT)
+	     (SETQ LIMIT (SECOND E))
+	     (SETQ E (THIRD E))
+	     (DO J 0 (1+ J) (= J LIMIT)
+	       (AS-1 E ARRAY (+ J I)))
+	     (SETQ I (+ I LIMIT)))
+	    ((EQ (CAR E) '*REPEAT-EVAL)
+	     (SETQ LIMIT (SECOND E))
+	     (SETQ E (THIRD E))
+	     (DO J 0 (1+ J) (= J LIMIT)
+	       (AS-1 (EVAL E) ARRAY (+ J I)))
+	     (SETQ I (+ I LIMIT)))
+	    (T
+	     (AS-1 E ARRAY I)
+	     (SETQ I (1+ I))))))
+
+(DEFUN ED-CONVERT-3D-LIST (LIST &AUX DIM1 DIM2 DIM3 ARRAY)
+    (SETQ DIM1 (LENGTH LIST)
+	  DIM2 (LENGTH (CAR LIST))
+	  DIM3 (LENGTH (CAAR LIST)))
+    (SETQ ARRAY (MAKE-ARRAY ED-RANDOM-AREA 'ART-Q (LIST DIM1 DIM2 DIM3)))
+    (DO ((L1 LIST (CDR L1))
+	 (A1 0 (1+ A1)))
+	((NULL L1))
+      (DO ((L2 (CAR L1) (CDR L2))
+	   (A2 0 (1+ A2)))
+	  ((NULL L2))
+	(DO ((L3 (CAR L2) (CDR L3))
+	     (A3 0 (1+ A3)))
+	    ((NULL L3))
+	  (AS-3 (CAR L3) ARRAY A1 A2 A3))))
+    ARRAY)
+
+
+(SETQ ED-INITIAL-LIST-SYNTAX-LIST
+    '(
+      (*REPEAT-EVAL 40 ED-LIST-ALPHABETIC)
+      
+      ED-LIST-DELIMITER		;040 space
+      ED-LIST-ALPHABETIC	;041 !
+      ED-LIST-DOUBLE-QUOTE	;042 "     "
+      ED-LIST-ALPHABETIC	;043 #
+      ED-LIST-ALPHABETIC	;044 $
+      ED-LIST-ALPHABETIC	;045 %
+      ED-LIST-ALPHABETIC	;046 &
+      ED-LIST-SINGLE-QUOTE	;047 '
+      ED-LIST-OPEN		;050 (
+      ED-LIST-CLOSE		;051 )
+      ED-LIST-ALPHABETIC	;052 *
+      ED-LIST-ALPHABETIC	;053 +
+      ED-LIST-SINGLE-QUOTE	;054 ,
+      ED-LIST-ALPHABETIC	;055 -
+      ED-LIST-ALPHABETIC	;056 .
+      ED-LIST-SLASH		;057 /
+      (*REPEAT-EVAL 10. ED-LIST-ALPHABETIC)			;DIGITS
+      ED-LIST-ALPHABETIC	;072 :
+      ED-LIST-ALPHABETIC	;073 ;
+      ED-LIST-ALPHABETIC	;074 <
+      ED-LIST-ALPHABETIC	;075 =
+      ED-LIST-ALPHABETIC	;076 >
+      ED-LIST-ALPHABETIC	;077 ?
+      ED-LIST-ALPHABETIC	;100 @
+      (*REPEAT-EVAL 26. ED-LIST-ALPHABETIC)			;LETTERS
+      ED-LIST-ALPHABETIC	;133 [
+      ED-LIST-ALPHABETIC	;134 \
+      ED-LIST-ALPHABETIC	;135 ]
+      ED-LIST-ALPHABETIC	;136 ^
+      ED-LIST-ALPHABETIC	;137 _
+      ED-LIST-SINGLE-QUOTE	;140 ` STANDARD MACRO
+      (*REPEAT-EVAL 26. ED-LIST-ALPHABETIC)			;MORE LETTERS
+      ED-LIST-ALPHABETIC	;173 {
+      ED-LIST-ALPHABETIC	;174 |            |
+      ED-LIST-ALPHABETIC	;175 }
+      ED-LIST-ALPHABETIC	;176 ~
+      ED-LIST-ALPHABETIC	;177 integral ???
+      
+      ED-LIST-ALPHABETIC	;200 null character
+      ED-LIST-DELIMITER		;201 break
+      ED-LIST-DELIMITER		;202 clear
+      ED-LIST-DELIMITER		;203 call
+      ED-LIST-DELIMITER		;204 escape (NOT altmode!)
+      ED-LIST-DELIMITER		;205 backnext
+      ED-LIST-DELIMITER		;206 help
+      ED-LIST-DELIMITER		;207 rubout
+      ED-LIST-ALPHABETIC	;210 bs
+      ED-LIST-DELIMITER		;211 tab
+      ED-LIST-DELIMITER		;212 line
+      ED-LIST-DELIMITER		;213 vt
+      ED-LIST-DELIMITER		;214 form = newpage
+      ED-LIST-DELIMITER		;215 return = newline
+      (*REPEAT-EVAL 162 ED-LIST-ALPHABETIC)))
+
+
+;  ED-WORD-ALPHABETIC 0
+;  ED-WORD-DELIMITER 1
+
+(SETQ ED-INITIAL-WORD-SYNTAX-LIST
+  '( 
+  (*REPEAT-EVAL 40 ED-LIST-ALPHABETIC)
+  ED-WORD-DELIMITER	;040 space
+  ED-WORD-DELIMITER	;041 !
+  ED-WORD-DELIMITER	;042 "     "
+  ED-WORD-DELIMITER	;043 #
+  ED-WORD-ALPHABETIC	;044 $
+  ED-WORD-ALPHABETIC	;045 %
+  ED-WORD-DELIMITER	;046 &
+  ED-WORD-DELIMITER	;047 '
+  ED-WORD-DELIMITER	;050 (
+  ED-WORD-DELIMITER	;051 )
+  ED-WORD-DELIMITER	;052 *
+  ED-WORD-DELIMITER	;053 +
+  ED-WORD-DELIMITER	;054 ,
+  ED-WORD-DELIMITER	;055 -
+  ED-WORD-ALPHABETIC	;056 .
+  ED-WORD-DELIMITER	;057 /
+  (*REPEAT-EVAL 10. ED-WORD-ALPHABETIC)			;DIGITS
+  ED-WORD-DELIMITER	;072 :
+  ED-WORD-DELIMITER	;073 ;
+  ED-WORD-DELIMITER	;074 <
+  ED-WORD-DELIMITER	;075 =
+  ED-WORD-DELIMITER	;076 >
+  ED-WORD-DELIMITER	;077 ?
+  ED-WORD-DELIMITER	;100 @
+  (*REPEAT-EVAL 26. ED-WORD-ALPHABETIC)			;LETTERS
+  ED-WORD-DELIMITER	;133 [
+  ED-WORD-DELIMITER	;134 \
+  ED-WORD-DELIMITER	;135 ]
+  ED-WORD-DELIMITER	;136 ^
+  ED-WORD-DELIMITER	;137 _
+  ED-WORD-DELIMITER	;140 `
+  (*REPEAT-EVAL 26. ED-WORD-ALPHABETIC)			;LETTERS
+  (*REPEAT-EVAL 205 ED-WORD-DELIMITER)))
+ 
+
+;FUNCTIONS TO BE WRITTEN.
+;THESE ARE IN THE COMMAND-DISPATCH-TABLE, JUST WAITING FOR SOME
+;KIND SOUL TO MAKE THEM WORK.  WHY NOT CONTRIBUTE?  JUST SEND YOUR
+;CONTRIBUTION TO
+;	THE LISP MACHINE
+;	ROOM 907
+;	545 TECHNOLOGY SQUARE
+;	CAMBRIDGE, MASS. 02139
+; THANK YOU.
+	  ;ED-COM-BACKWARD-SENTENCE
+	  ;ED-COM-BACKWARD-PARAGRAPH
+	  ;ED-COM-FORWARD-PARAGRAPH
+          ;ED-COM-FORMAT-CODE

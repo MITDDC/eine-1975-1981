@@ -1,0 +1,493 @@
+;;; This file is part of EINE, the Lisp Machine editor.       -*-LISP-*-
+;;; For more information see LISPM2;EINE INFO.
+
+;Editor mouse stuff.
+;This depends on the stuff in LISPM2;EMOUSE >.
+
+(DECLARE (SETQ RETAIN-VARIABLE-NAMES-SWITCH 'ARGS))
+(DECLARE (SETQ OPEN-CODE-MAP-SWITCH T))
+
+;EDM-SCROLL-FAST and EDM-MARK-PARAGRAPH have not been written yet.
+(DECLARE (SPECIAL MOUSE-X MOUSE-Y MOUSE-REGION ARROW
+		  EDM-TEXT-MOUSE-REGION EDM-BOX-MOUSE-REGION EDM-USUAL-MOUSE-REGION-TABLE 
+		  MOUSE-ROLLOVER EDM-SAVED-COMMAND-STREAM EDM-IO-UNRCHF))
+
+(SETQ EDM-IO-UNRCHF NIL)
+
+;This variation on the MOUSE-REGION defstruct in EMOUSE includes extra stuff
+;for editor-type mouse regions
+(DEFSTRUCT (EDM-MAKE-MOUSE-REGION) ARRAY 
+	EDM-MOUSE-REGION-NAME		;A symbol
+	EDM-MOUSE-REGION-X-MIN		;Coordinates of upper left corner of rectangle.
+	EDM-MOUSE-REGION-Y-MIN		;..			(inclusive)
+	EDM-MOUSE-REGION-X-MAX		;Coordinates of lower right corner of rectangle.
+	EDM-MOUSE-REGION-Y-MAX		;..			(exclusive)
+	EDM-MOUSE-REGION-NUMBER		;Inserted in returned "character" by KBD-OR-MOUSE-TYI.
+	EDM-MOUSE-REGION-ENTER-FCN	;NIL or function to call (region) when entering.
+	EDM-MOUSE-REGION-LEAVE-FCN	;NIL or function to call (region) when leaving.
+	EDM-MOUSE-REGION-MOVE-FCN	;Called (region,x,y) to put mouse tracker at (x,y)
+	EDM-MOUSE-REGION-ARROW-CHAR	;Character in the ARROW font to be used.
+	EDM-MOUSE-REGION-Y-BIAS		;Distance from top of character to place pointed to.
+)
+
+(DEFUN ED-INITIALIZE-MOUSE ()
+  (SETQ EDM-USUAL-MOUSE-REGION-TABLE 
+    (SETQ MOUSE-REGION-TABLE
+      (LIST (SETQ EDM-TEXT-MOUSE-REGION
+		  (EDM-MAKE-MOUSE-REGION EDM-MOUSE-REGION-NAME 'TEXT
+					 EDM-MOUSE-REGION-X-MIN -100
+					 EDM-MOUSE-REGION-Y-MIN 2
+					 EDM-MOUSE-REGION-X-MAX (- TV-SCREEN-WIDTH 6)
+					 EDM-MOUSE-REGION-Y-MAX (- TV-SCREEN-HEIGHT 12)
+					 EDM-MOUSE-REGION-NUMBER 0
+					 EDM-MOUSE-REGION-ENTER-FCN 'EDM-ENTER-MOUSE-REGION
+					 EDM-MOUSE-REGION-LEAVE-FCN 'EDM-LEAVE-MOUSE-REGION
+					 EDM-MOUSE-REGION-MOVE-FCN 'EDM-MOUSE-MOVE-FCN
+					 EDM-MOUSE-REGION-ARROW-CHAR 0
+					 EDM-MOUSE-REGION-Y-BIAS 2))
+	    (EDM-MAKE-MOUSE-REGION EDM-MOUSE-REGION-NAME 'LINE
+				   EDM-MOUSE-REGION-X-MIN -300
+				   EDM-MOUSE-REGION-Y-MIN 2
+				   EDM-MOUSE-REGION-X-MAX -100
+				   EDM-MOUSE-REGION-Y-MAX (- TV-SCREEN-HEIGHT 12)
+				   EDM-MOUSE-REGION-NUMBER 1
+				   EDM-MOUSE-REGION-ENTER-FCN 'EDM-ENTER-MOUSE-REGION
+				   EDM-MOUSE-REGION-LEAVE-FCN 'EDM-LEAVE-MOUSE-REGION
+				   EDM-MOUSE-REGION-MOVE-FCN 'EDM-MOUSE-MOVE-FCN
+				   EDM-MOUSE-REGION-ARROW-CHAR 1
+				   EDM-MOUSE-REGION-Y-BIAS -5)
+	    (EDM-MAKE-MOUSE-REGION EDM-MOUSE-REGION-NAME 'PARAGRAPH
+				   EDM-MOUSE-REGION-X-MIN -500
+				   EDM-MOUSE-REGION-Y-MIN 2
+				   EDM-MOUSE-REGION-X-MAX -300
+				   EDM-MOUSE-REGION-Y-MAX (- TV-SCREEN-HEIGHT 12)
+				   EDM-MOUSE-REGION-NUMBER 2
+				   EDM-MOUSE-REGION-ENTER-FCN 'EDM-ENTER-MOUSE-REGION
+				   EDM-MOUSE-REGION-LEAVE-FCN 'EDM-LEAVE-MOUSE-REGION
+				   EDM-MOUSE-REGION-MOVE-FCN 'EDM-MOUSE-MOVE-FCN
+				   EDM-MOUSE-REGION-ARROW-CHAR 2
+				   EDM-MOUSE-REGION-Y-BIAS -5))))
+  (SETQ EDM-BOX-MOUSE-REGION
+	(EDM-MAKE-MOUSE-REGION EDM-MOUSE-REGION-NAME 'BOX
+			       EDM-MOUSE-REGION-X-MIN 2
+			       EDM-MOUSE-REGION-Y-MIN 2
+			       EDM-MOUSE-REGION-X-MAX (- TV-SCREEN-WIDTH 2)
+			       EDM-MOUSE-REGION-Y-MAX (- TV-SCREEN-HEIGHT 2)
+			       EDM-MOUSE-REGION-NUMBER 0
+			       EDM-MOUSE-REGION-ENTER-FCN 'EDM-ENTER-MOUSE-REGION
+			       EDM-MOUSE-REGION-LEAVE-FCN 'EDM-LEAVE-MOUSE-REGION
+			       EDM-MOUSE-REGION-MOVE-FCN 'EDM-MOUSE-MOVE-FCN
+			       EDM-MOUSE-REGION-ARROW-CHAR ## X 
+			       EDM-MOUSE-REGION-Y-BIAS 2))
+  (SETQ MOUSE-BLINKER
+	(TV-DEFINE-BLINKER NIL 'VISIBILITY NIL 'ROVING-P T 'HALF-PERIOD 8
+			   'FUNCTION 'TV-CHARACTER-BLINKER 'ARG1 ARROW 'ARG2 0))
+  (MOUSE-SET-POS 569. 440.)) ;Lower-right corner of text region
+
+(DEFUN ED-RESET-MOUSE ()  ;from ED-PRE-RECOVER
+  (SETQ MOUSE-REGION-TABLE EDM-USUAL-MOUSE-REGION-TABLE))
+
+(DEFUN EDM-ENTER-MOUSE-REGION (REGION)
+  (TV-SET-BLINKER-FUNCTION MOUSE-BLINKER
+			   'TV-CHARACTER-BLINKER
+			   ARROW
+			   (EDM-MOUSE-REGION-ARROW-CHAR REGION))
+  (TV-SET-BLINKER-VISIBILITY MOUSE-BLINKER ED-MOUSE-VISIBILITY))
+
+(DEFUN EDM-LEAVE-MOUSE-REGION (REGION)
+  (TV-SET-BLINKER-VISIBILITY MOUSE-BLINKER NIL))
+
+(DEFUN EDM-MOUSE-MOVE-FCN (REGION X Y)
+  (TV-SET-BLINKER-CURSORPOS MOUSE-BLINKER
+			    (MAX 0 X)
+			    (+ (EDM-MOUSE-REGION-Y-BIAS REGION) Y)))
+
+(DEFUN ED-COM-MOUSE-ON (CHR)
+   (SETQ ED-MOUSE-VISIBILITY 'BLINK)
+   (TV-SET-BLINKER-VISIBILITY MOUSE-BLINKER 'BLINK)
+   (SETQ EDM-SAVED-COMMAND-STREAM ED-COMMAND-STREAM)
+   (SETQ ED-COMMAND-STREAM 'EDM-IO)
+   (SETQ MOUSE-TABLET-P NIL)
+   ED-DIS-NONE)
+
+(DEFUN ED-COM-TABLET-ON (CHR)
+   (SETQ ED-MOUSE-VISIBILITY 'BLINK)
+   (TV-SET-BLINKER-VISIBILITY MOUSE-BLINKER 'BLINK)
+   (SETQ EDM-SAVED-COMMAND-STREAM ED-COMMAND-STREAM)
+   (SETQ ED-COMMAND-STREAM 'EDM-IO)
+   (SETQ MOUSE-TABLET-P T)
+   ED-DIS-NONE)
+
+;This is both the MOUSE OFF and the TABLET OFF command.
+(DEFUN ED-COM-MOUSE-OFF (CHR)
+   (SETQ ED-MOUSE-VISIBILITY NIL)
+   (TV-SET-BLINKER-VISIBILITY MOUSE-BLINKER NIL)
+   (SETQ ED-COMMAND-STREAM EDM-SAVED-COMMAND-STREAM)
+   ED-DIS-NONE)
+
+(DEFUN EDM-IO (OP &OPTIONAL ARG1)
+     (SELECTQ OP
+	      (WHICH-OPERATIONS '(TYI UNTYI))
+	      (TYI (COND (EDM-IO-UNRCHF
+			  (PROG1 EDM-IO-UNRCHF (SETQ EDM-IO-UNRCHF NIL)))
+			 (T (KBD-OR-MOUSE-TYI))))
+	      (UNTYI (SETQ EDM-IO-UNRCHF ARG1))
+	      (OTHERWISE (ERROR "ILLEGAL ARG TO STREAM -- EDM-IO" OP))))
+
+; Returns a BP and a WINDOW (editor structure) which reflect the current position of the mouse,
+; which comes from MOUSE-X and MOUSE-Y.
+; If the mouse is not in any window, both values will be NIL.
+; Note that the region which the mouse is in can be found in MOUSE-REGION.
+(DEFUN ED-MOUSE-BP ()
+  (PROG (WINDOW PC-PPR X Y PLINE LINE CHAR-POS REAL-PLINE EWINDOW)
+     ;First, get the coordinates of top-left corner of char pointed to
+     (SETQ Y MOUSE-Y)
+     (AND (EQ MOUSE-REGION EDM-TEXT-MOUSE-REGION) ;X only matters in text region
+	  (SETQ X (MAX 2 MOUSE-X)))
+     ;Second, find which window it is in.
+     (SETQ WINDOW (ED-MOUSE-WINDOW))
+     (OR WINDOW (RETURN NIL NIL))			;Not in any object?
+     (SETQ EWINDOW (FUNCALL WINDOW 'WINDOW))
+     (SETQ PC-PPR (ED-WINDOW-PC-PPR EWINDOW))
+     ;; FIgure out which text line in the window we are in.
+     (SETQ PLINE (// (MAX 0 (- Y (PC-PPR-TOP-MARGIN PC-PPR)))
+		     (PC-PPR-LINE-HEIGHT PC-PPR)))
+     (SETQ REAL-PLINE PLINE)
+     ;; If that's a continuation line, move back to real start of line.
+     (DO NIL
+	 ((NOT (OR (NULL (SETQ LINE (AR-2 EWINDOW PLINE 0)))
+		   (NUMBERP LINE))))
+	 (SETQ PLINE (1- PLINE)))
+     ;; If this "line" is a list, it represents a buffer's header lines,
+     ;; and its car is the buffer.  Return ptr to start of that buffer.
+     (AND (LISTP LINE)
+	  (RETURN (ED-BP 0 (AR-1 (CAR LINE) 0) 'TEMP) WINDOW))
+     (COND ((EQ MOUSE-REGION EDM-TEXT-MOUSE-REGION)	;In text region,
+	    (MULTIPLE-VALUE (X Y CHAR-POS)	; find where in the line it is
+		(TV-COMPUTE-MOTION PC-PPR 0 0
+				   LINE 0 NIL NIL
+				   (MAX 0 (- X (PC-PPR-LEFT-MARGIN PC-PPR)))
+				   (* (- PLINE REAL-PLINE) (PC-PPR-LINE-HEIGHT PC-PPR)))))
+	   (T (SETQ CHAR-POS 0)))		;Otherwise, just start of line
+     (OR CHAR-POS (SETQ CHAR-POS (ED-LINE-FILL-POINTER LINE)))
+     (RETURN (ED-BP CHAR-POS LINE 'TEMP) EWINDOW)))
+
+;Which window is the mouse pointing into?
+(DEFUN ED-MOUSE-WINDOW (&AUX (X 2) Y)
+     (SETQ Y MOUSE-Y)
+     (AND (EQ MOUSE-REGION EDM-TEXT-MOUSE-REGION) ;X only matters in text region
+	  (SETQ X (MAX 2 MOUSE-X)))
+     (DO ((WL SCREEN-WINDOWS (CDR WL)))
+	 ((NULL WL)
+	  NIL)
+       (AND (FUNCALL (CAR WL) 'CONTAINS-POINT-P X Y)
+	    (RETURN (CAR WL)))))
+
+(DEFUN EDM-SETUP (&AUX BP WINDOW)
+    (MULTIPLE-VALUE (BP WINDOW)			;Find where the mouse is
+		    (ED-MOUSE-BP))
+    (COND ((NULL BP)
+	   (ED-BARF "There is no window there."))	;Not in any window
+	  ((NEQ WINDOW ED-WINDOW)
+	   (AND (ED-SELECT-WINDOW WINDOW)
+		(ED-WINDOW-REDISPLAY (ED-BUFFER-POINT (ED-WINDOW-BUFFER WINDOW)) WINDOW))))
+    (OR (EQ (ED-BP-BUFFER BP) ED-OPEN-BUFFER)
+	(PROGN (ED-SELECT-BUFFER WINDOW (ED-OPEN-BUFFER (ED-BP-BUFFER BP)))
+	       (ED-UPDATE-MODE-LINE)))
+    BP)
+
+;Return the absolute X and Y position at which BP occurs in WINDOW,
+;or NIL NIL if BP is not on the screen.
+(DEFUN EDM-FIND-BP (BP WINDOW)
+    (PROG (PC-PPR X Y)
+	  (MULTIPLE-VALUE (X Y)
+			  (ED-FIND-BP-IN-WINDOW BP WINDOW))
+	  (OR X (RETURN NIL NIL))
+	  (SETQ PC-PPR (ED-WINDOW-PC-PPR WINDOW))
+	  (RETURN (+ X (PC-PPR-LEFT-MARGIN PC-PPR))
+		  (+ Y (PC-PPR-TOP-MARGIN PC-PPR)))))
+
+;[1] TEXT
+;Jump point and mark to where the mouse is, then as the mouse is moved
+;with the button held down point follows the mouse.
+;Some issues with edges remain to be resolved.
+(DEFUN EDM-MARK-REGION (CHR &AUX BP WINDOW (ED-REDISPLAY-DEGREE ED-DIS-BUFFER))
+    (SETQ BP (EDM-SETUP))			;Find where the mouse is now
+    (ED-MOVE-BP (ED-BUFFER-MARK) BP)		;Put point and mark there
+    (ED-MOVE-POINT BP)
+    (SETF (ED-BUFFER-MARK-P) T)
+    (SETQ ED-MARK-STAYS T)			;Create a region
+    (ED-WINDOW-APPROPRIATE-REDISPLAY ED-WINDOW)	;Make the display reasonable
+    (DO ()
+	((ZEROP (LOGAND MOUSE-ROLLOVER (MOUSE-BUTTON-WORD)))	;Do until button lifted
+	 (SETQ MOUSE-ROLLOVER 0))		; then remember that button has been lifted
+      (COND ((MOUSE-FOLLOW)			;Track the mouse, if it moved then
+	     (MULTIPLE-VALUE (BP WINDOW)	; compute where it points to now,
+			     (ED-MOUSE-BP))
+	     (COND ((AND (EQ WINDOW ED-WINDOW)	; flush if moved out of window,
+			 (EQ (ED-BP-BUFFER BP)	; or out of buffer.  Else,
+			     ED-OPEN-BUFFER))
+		    (ED-MOVE-POINT BP)		; make point follow the mouse,
+		    (ED-WINDOW-APPROPRIATE-REDISPLAY ED-WINDOW)	;Make the display reasonable
+		    )))))
+    ED-DIS-NONE)
+
+;[11] TEXT 
+;Jump the mouse to the closer of point or mark, and you are moving it.
+(DEFUN EDM-MOVE-REGION (CHR &AUX PX PY MX MY BP BP1 WINDOW)
+    (SETQ ED-MARK-STAYS T)
+    (MULTIPLE-VALUE (MX MY)
+		    (EDM-FIND-BP (ED-BUFFER-MARK) ED-WINDOW))
+    (MULTIPLE-VALUE (PX PY)
+		    (EDM-FIND-BP (ED-BUFFER-POINT) ED-WINDOW))
+    (OR PX (ED-BARF "Point not found in window -- EDM"))
+    (SETQ BP (COND ((NOT (ED-BUFFER-MARK-P)) (ED-BUFFER-POINT))
+		   ((NULL MX) (ED-BUFFER-POINT))
+		   ((< (+ (ABS (- MOUSE-X PX)) (ABS (- MOUSE-Y PY)))
+		       (+ (ABS (- MOUSE-X MX)) (ABS (- MOUSE-Y MY))))
+		    (ED-BUFFER-POINT))
+		   (T
+		    (SETQ PX MX PY MY)
+		    (ED-BUFFER-MARK))))
+    (MOUSE-SET-POS PX (+ PY (// (* (PC-PPR-LINE-HEIGHT (ED-WINDOW-PC-PPR ED-WINDOW)) 3) 4))) 
+    (DO ((ED-REDISPLAY-DEGREE ED-DIS-BUFFER))
+	((ZEROP (LOGAND MOUSE-ROLLOVER (MOUSE-BUTTON-WORD)))	;Do until button lifted
+	 (SETQ MOUSE-ROLLOVER 0))		; then remember that button has been lifted
+      (COND ((MOUSE-FOLLOW)			;Track the mouse, if it moved then
+	     (MULTIPLE-VALUE (BP1 WINDOW)	; compute where it points to now,
+			     (ED-MOUSE-BP))
+	     (COND ((EQ WINDOW ED-WINDOW)	; flush if moved out of window,
+		    (ED-MOVE-BP BP BP1)		; make point follow the mouse,
+		    (ED-WINDOW-APPROPRIATE-REDISPLAY ED-WINDOW))))))
+    ED-DIS-NONE)
+
+;[2] TEXT
+; Go forward up list, set mark, then go backward over list and set point.
+(DEFUN EDM-MARK-LIST (CHR &AUX BP WINP)
+    (SETQ BP (EDM-SETUP))
+    (MULTIPLE-VALUE (BP WINP)
+		    (ED-FORWARD-LIST-BP BP 1 1))
+    (OR WINP (ED-BARF))
+    (ED-MOVE-BP (ED-BUFFER-MARK) BP)
+    (MULTIPLE-VALUE (BP WINP)
+		    (ED-BACKWARD-LIST-BP BP 1))
+    (OR WINP (ED-BARF))
+    (ED-MOVE-POINT BP)
+    (SETF (ED-BUFFER-MARK-P) T)
+    (SETQ ED-MARK-STAYS T)
+    ED-DIS-BPS)
+
+;[3] TEXT
+;Same as above for S-expressions.
+(DEFUN EDM-MARK-SEXP (CHR &AUX BP WINP TEM)
+    (SETQ BP (EDM-SETUP))
+    (SETQ TEM (AR-1 ED-WORD-SYNTAX-TABLE ## -))
+    (AS-1 ED-WORD-ALPHABETIC ED-WORD-SYNTAX-TABLE ## -) 
+    (MULTIPLE-VALUE (BP WINP)
+		    (ED-FORWARD-WORD-BP BP 1))
+    (COND ((NOT WINP)
+	   (AS-1 TEM ED-WORD-SYNTAX-TABLE ## -)
+	   (ED-BARF)))
+    (OR (CHAR-EQUAL (ED-BP-CHAR BP) 40)
+	(ED-INSERT-CHARS BP 40))
+    (ED-MOVE-BP-FORWARD BP 1)				;If possible.
+    (ED-MOVE-BP (ED-BUFFER-MARK) BP)
+    (MULTIPLE-VALUE (BP WINP)
+		    (ED-BACKWARD-WORD-BP BP 1))
+    (AS-1 TEM ED-WORD-SYNTAX-TABLE ## -)
+    (OR WINP (ED-BARF))
+    (ED-MOVE-POINT BP)
+    (SETF (ED-BUFFER-MARK-P) T)
+    (SETQ ED-MARK-STAYS T)
+    ED-DIS-BPS)
+
+;[22]
+;Yank at the location the mouse is pointing to.
+(DEFUN EDM-YANK (CHR &AUX BP)
+    (OR ED-KILL-RING (ED-BARF))
+    (SETQ ED-CURRENT-COMMAND-TYPE 'YANK)
+    (SETQ BP (EDM-SETUP))
+    (ED-MOVE-BP (ED-BUFFER-MARK) BP)
+    (ED-MOVE-POINT (ED-INSERT-THING BP (CAR ED-KILL-RING)))
+    (SETF (ED-BUFFER-MARK-P) T)
+    (SETQ ED-MARK-STAYS T)
+    ED-DIS-BUFFER)
+
+;[222]
+;Same as YANK-POP (meta Y) for now.  Is this right?
+(DEFUN EDM-YANK-OTHER (CHR)
+    (OR (ED-BUFFER-MARK-P) (ED-BARF))
+    (OR (EQ ED-LAST-COMMAND-TYPE 'YANK) (ED-BARF))
+    (SETQ ED-CURRENT-COMMAND-TYPE 'YANK)
+    (ED-DELETE-BETWEEN (ED-BUFFER-POINT) (ED-BUFFER-MARK))
+    (ED-KILL-RING-POP)
+    (ED-MOVE-POINT (ED-INSERT-THING (ED-BUFFER-POINT) (CAR ED-KILL-RING)))
+    (SETQ ED-MARK-STAYS T)
+    ED-DIS-BUFFER)
+
+;[33]
+;Same as KILL-REGION (control W) for now.
+;Leaves the mouse pointing at where it was so that if you yank back without
+;moving the mouse you will undo what you just did.
+(DEFUN EDM-KILL (CHR &AUX X Y BP1 BP2)
+    (OR (ED-BUFFER-MARK-P) (ED-BARF))
+    (MULTIPLE-VALUE (BP1 BP2)
+		    (ED-ORDER-BPS (ED-BUFFER-POINT) (ED-BUFFER-MARK)))
+    (MULTIPLE-VALUE (X Y)		;Do this before killing so that display is accurate!
+		    (EDM-FIND-BP BP1 ED-WINDOW))
+    (SETQ ED-CURRENT-COMMAND-TYPE 'KILL)
+    (ED-KILL-BETWEEN BP1 BP2 (EQ BP1 (ED-BUFFER-POINT)))
+    (AND X				;If the place was on screen, put mouse there
+	 (MOUSE-SET-POS X		;But if not, don't barf, just don't move mouse
+			(+ Y (// (* (PC-PPR-LINE-HEIGHT (ED-WINDOW-PC-PPR)) 3) 4))))
+    ED-DIS-BUFFER)
+
+;[333]
+;Put region on kill ring but don't actually kill it
+(DEFUN EDM-SAVE (CHR)
+    (OR (ED-BUFFER-MARK-P) (ED-BARF))
+    (ED-SAVE-BETWEEN (ED-BUFFER-POINT) (ED-BUFFER-MARK))
+    (SETQ ED-MARK-STAYS T)
+    ED-DIS-NONE)
+
+;[1] LINE
+;Kludge...
+(DEFUN EDM-SHOW-LINE-AT-TOP (CHR)
+    (ED-MOVE-POINT (EDM-SETUP))
+    ((LAMBDA (ED-NUMERIC-ARG ED-NUMERIC-ARG-P)
+	     (ED-COM-REPOSITION-WINDOW NIL))
+     0 T)
+    (SETQ ED-MARK-STAYS NIL)
+    ED-DIS-NONE)
+
+;[11] LINE
+;Kludge...
+(DEFUN EDM-SHOW-LINE-AT-BOTTOM (CHR)
+    (ED-MOVE-POINT (EDM-SETUP))
+    ((LAMBDA (ED-NUMERIC-ARG ED-NUMERIC-ARG-P)
+	     (ED-COM-REPOSITION-WINDOW NIL))
+     (1- (ED-WINDOW-FILL-POINTER)) T)
+    (SETQ ED-MARK-STAYS NIL)
+    ED-DIS-NONE)
+
+;[2] LINE
+; Mark all lines which are containing the list started by the first left paren on this line.
+(DEFUN EDM-MARK-LINE-LIST (CHR &AUX BP WINP)
+    (SETQ BP (EDM-SETUP))			;Get a BP to the front of the line
+    (ED-MOVE-POINT BP)				;Put point there (start of region)
+    (MULTIPLE-VALUE (BP WINP)			;Find the end of the list
+		    (ED-FORWARD-LIST-BP BP 1))
+    (OR WINP (ED-BARF))
+    (AND (= (ED-BP-LINE-NUM BP) (1- (ED-BUFFER-FILL-POINTER)))
+	 (ED-BARF))				;Lose if no next line
+    (ED-MOVE-BP (ED-BUFFER-MARK)		;Otherwise put the mark at the beginning of
+		(1+ (ED-BP-LINE-NUM BP))	; the next line.
+		0)
+    (SETF (ED-BUFFER-MARK-P) T)
+    (SETQ ED-MARK-STAYS T)
+    ED-DIS-BPS)
+
+;[3] LINE
+;Mark just the line pointed to.
+(DEFUN EDM-MARK-LINE (CHR &AUX BP)
+    (SETQ BP (EDM-SETUP))			;Get a BP to the front of the line
+    (ED-MOVE-POINT BP)				;Put point there (start of region)
+    (AND (= (ED-BP-LINE-NUM BP) (1- (ED-BUFFER-FILL-POINTER)))
+	 (ED-BARF))				;Lose if no next line
+    (ED-MOVE-BP (ED-BUFFER-MARK) (1+ (ED-BP-LINE-NUM BP)) 0)	;Otherwise put mark at
+    (SETF (ED-BUFFER-MARK-P) T)			; the start of the following line.
+    (SETQ ED-MARK-STAYS T)
+    ED-DIS-BPS)
+
+;[1] PARAGRAPH
+(DEFUN EDM-SCROLL-FAST (CHR) (TV-BEEP) ED-DIS-NONE)
+
+;[2] PARAGRAPH
+(DEFUN EDM-MARK-DEFUN (CHR &AUX BP WINP)
+    (ED-MOVE-POINT (EDM-SETUP))
+    (ED-COM-MARK-DEFUN NIL))
+
+;[3] PARAGRAPH
+(DEFUN EDM-MARK-PARAGRAPH (CHR) (TV-BEEP) ED-DIS-NONE)
+
+(DEFUN ED-COM-DEFINE-WINDOW (CHR &AUX LEFT RIGHT TOP BOTTOM W)
+    (MULTIPLE-VALUE (LEFT TOP RIGHT BOTTOM)
+		    (EDM-GET-SCREEN-REGION "Define window"))
+    (OR (AND (> RIGHT LEFT) (> BOTTOM TOP))
+	(ED-BARF "That is too small."))
+    (SETQ W (ED-CREATE-WINDOW (GENSYM) TOP BOTTOM LEFT RIGHT))
+    (ED-SELECT-BUFFER W (ED-CREATE-BUFFER))
+    (ED-SELECT-WINDOW W)
+    ED-DIS-BUFFER)
+
+;Returns the LEFT, TOP, RIGHT and BOTTOM of the marked region.
+(DEFUN EDM-GET-SCREEN-REGION (PROMPT
+			      &OPTIONAL X1 Y1 X2 Y2 
+			      &AUX )
+  (PROG NIL
+     (ED-BIND-MODE-LINE PROMPT ED-MOUSE-MODE-LIST
+        (LET ((ED-MOUSE-VISIBILITY T)
+	      (MOUSE-REGION-TABLE (LIST EDM-BOX-MOUSE-REGION))
+	      (MOUSE-REGION EDM-BOX-MOUSE-REGION))
+	     (EDM-ENTER-MOUSE-REGION EDM-BOX-MOUSE-REGION)
+	     (COND ((NULL X1)
+		    (DO ()				;Wait for him to press a button.
+			((NOT (ZEROP (MOUSE-BUTTON-WORD))))
+			(MOUSE-FOLLOW))
+		    (SETQ X1 MOUSE-X Y1 MOUSE-Y)	;Save upper left corner.
+		    (SETQ X2 MOUSE-X Y2 MOUSE-Y))	;Initialize.
+		   (T (MOUSE-SET-POS X2 Y2)))
+	     (ED-DRAW-BOX X1 Y1 X2 Y2)			;Draw initial box.
+	     (DO () ;Do until button lifted.
+		 ((ZEROP (MOUSE-BUTTON-WORD)))
+	       (COND ((MOUSE-FOLLOW)
+		      (ED-DRAW-BOX X1 Y1 X2 Y2)		;Erase old box.
+		      (SETQ X2 MOUSE-X Y2 MOUSE-Y)	;Update position, and
+		      (ED-DRAW-BOX X1 Y1 X2 Y2))))	;  draw new box.
+	     (ED-DRAW-BOX X1 Y1 X2 Y2)))		;Erase box, all done.
+     (TV-SET-BLINKER-VISIBILITY MOUSE-BLINKER ED-MOUSE-VISIBILITY)	;Flush mouse blinker.
+     (AND ED-MOUSE-VISIBILITY (EDM-ENTER-MOUSE-REGION MOUSE-REGION))
+     (RETURN (MIN X1 X2) (MIN Y1 Y2) (MAX X1 X2) (MAX Y1 Y2))))
+
+(DEFUN ED-COM-MOVE-WINDOW (IGNORE &AUX W)
+    (SETQ W (EDM-CHOOSE-WINDOW "Move Window"))
+    (SCREEN-MOVE-WINDOW-MOUSE W)
+    (SCREEN-SELECT-WINDOW W)
+    ED-DIS-BUFFER)
+
+(DEFUN ED-COM-ADJUST-WINDOW-SIZE (IGNORE &AUX W)
+    (SETQ W (EDM-CHOOSE-WINDOW "Adjust Window Size"))
+    (SCREEN-ADJUST-WINDOW-SIZE-MOUSE W)
+    (SCREEN-SELECT-WINDOW W)
+    ED-DIS-BUFFER)
+
+(DEFUN ED-COM-KILL-WINDOW (CHR)
+    (SCREEN-KILL-WINDOW (EDM-CHOOSE-WINDOW "Kill Window"))
+    ED-DIS-BUFFER)
+
+(DEFUN ED-COM-BURY-WINDOW (IGNORE)
+    (SCREEN-BURY-WINDOW (EDM-CHOOSE-WINDOW "Bury Window"))
+    ED-DIS-BUFFER)
+
+;Ask the user to choose a window using the mouse.
+;Make the mouse temporarily visible even in Mouse Off mode, with an "X" cursor.
+(DEFUN EDM-CHOOSE-WINDOW (PROMPT)
+    (TV-SET-BLINKER-VISIBILITY MOUSE-BLINKER T)
+    (ED-BIND-MODE-LINE PROMPT ED-MOUSE-MODE-LIST
+        (LET ((MOUSE-REGION-TABLE (LIST EDM-BOX-MOUSE-REGION))
+	      (MOUSE-REGION MOUSE-REGION)
+	      (ED-MOUSE-VISIBILITY T))
+	    (EDM-ENTER-MOUSE-REGION EDM-BOX-MOUSE-REGION)
+	    (DO ()
+		((NOT (ZEROP (MOUSE-BUTTON-WORD))))	;Wait for him to press a button
+	      (MOUSE-FOLLOW))))
+    (EDM-ENTER-MOUSE-REGION MOUSE-REGION)
+    (TV-SET-BLINKER-VISIBILITY MOUSE-BLINKER ED-MOUSE-VISIBILITY)
+    (OR (ED-MOUSE-WINDOW)
+	(ED-BARF "There is no window there")))
+
+(DEFUN ED-REVERSE-MAPC (FUNCTION LIST)
+    (COND ((NULL LIST) NIL)
+	  (T (ED-REVERSE-MAPC FUNCTION (CDR LIST))
+	     (FUNCALL FUNCTION (CAR LIST)))))
+

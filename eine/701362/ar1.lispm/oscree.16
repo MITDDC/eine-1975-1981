@@ -1,0 +1,288 @@
+;-*-LISP-*-
+
+;A window is a function which corresponds to a thing whose image can be
+;displayed on the screen.  This function is called to display, clear out, etc.
+;that window.  It is called with the name of the operation requested
+;and additional arguments that depend on the operation.
+;The defined operations on windows are these:
+
+;KILL		tells the window to cease to exist.
+;		This is independent of erasing it from the screen.
+;EDGES		asks the window to say where its edges are.
+;		The window should return four absolute screen co-ordinates, (X1 Y1 X2 Y2).
+;		Not all windows need be rectangular.
+;		Those that are not, should return the corners of a "suitable"
+;		rectangle, such as a circumscribing one.
+;		EDGES should NOT be used for testing whether a point or
+;		another window is contained in a window;  there are separate
+;		operations for that, designed so that non-rectangular windows can win.
+;SET-EDGES (args: X1 Y2 X2 Y2)
+;		Tells the window to adjust its shape and position to
+;		the new set of edges.  A nonrectangular window should imagine
+;		moving its "suitable" rectange and move itself as if painted on.
+;DISPLAYING-BUFFER-P (arg: some kind of "buffer")
+;		asks the window whether the given buffer is being displayed
+;		in it.  The "buffer" can be any sort of thing that can be
+;		displayed "in" some sort of window.  If there is no such concept
+;		meaningful for a particular kind of window, it should return
+;		NIL to all questions of this sort.
+;		For example, editor windows check whether the argument is
+;		on the ED-WINDOW-BUFFER-ALIST, so the meaningful type of "buffer"
+;		is an editor buffer.
+;WHO-ARE-YOU	asks the window to return a string, for the user,
+;		saying what sort of a window it is and what is visible in it.
+;DISPLAY	means that the window should update its image on the screen.
+;		It may assume that nothing has touched its image
+;SELECT		informs the window that it is now "selected" as the recipient of
+;		keyboard and mouse commands.  A window must be activated before it
+;		is selected;  any window which is given this command may assume this.
+;DESELECT	informs the window that some other window is going to be selected,
+;		so this one will no longer be the recipient of keyboard and mouse commands.
+;		This is to give the window an opportunity to clean up.
+;		A window deselected remains active until deactivated.
+;OUTLINE	Draw the outline of the window.
+;UNOUTLINE	Erase the outline of the window.
+;MOUSE-ENTERS	tells the window that the mouse is appearing inside its screen region.
+;		This operation may return a function which will be used to track
+;		the mouse while the mouse remains in the window.
+;MOUSE-LEAVES	tells the window that the mouse has left its screen region.
+;DEACTIVATE	tells the window that it is no longer even to appear on the screen,
+;		because some other window which overlaps it has to appear.
+;		An inactive window may receive this command again.
+;ACTIVATE	tells the window that should now start appearing on the screen.
+;		It should not display itself, but should initialize its redisplay
+;		mechanism to be aware that nothing is known about what is on the screen.
+;		For windows with stupid redisplay mechanisms, a no-op may serve for this.
+;		It is legal to activate a window already active;
+;		windows must not assume that they were inactive when they recive this command.
+;		The window may examine SCREEN-SELECTED-WINDOW to determine
+;		whether it is selected.
+;SHADE		The window should overwrite its screen region with a light halftone,
+;		IOR'd into the window's image, so that such part of the image as
+;		is not re-used by other windows, will still be legible, though
+;		obviously "shaded".
+;CONTAINS-POINT-P (args: x-coord y-coord)
+;		asks whether the specified absolute screen point is inside the window.
+;		This should be fast!  Make it the first in your SELECTQ.
+;OVERLAPS-P (arg: another window)
+;		asks whether the other window's screen area overlaps this one's.  T or NIL.
+;CONTAINS-P (arg: another window)
+;		asks whether the other window's screen area is entirely contained
+;		within this one's.
+;OVERLAPS-RECTANGLE-P (args: X1, Y1, X2, Y2 = right, top, left, bottom co-ordinates)
+;		asks whether the window's screen area overlaps the specified rectangle.
+;CONTAINED-IN-RECTANGLE-P (args: same as OVERLAPS-RECTANGLE-P)
+;		asks whether the window's screen area is entirely contained
+;		within the specified rectangle.
+;COMMAND (arg: character or mouse character)
+;		issues the window a command from the keyboard.
+;WINDOW		is to enable not-fully-converted functions to cheat.
+;		It returns the editor window corresponding to a window.
+
+;SCREEN-WINDOWS is a list of all windows "known", in "order of interest":
+;    most recently selected come first.  Not all windows must actually be on the list,
+;    but at least all active ones must be.  This list is used for selecting windows
+;    with the mouse, and for resurrecting windows when some window is buried or killed,
+;    so if you don't want a window to be selected it should NOT be on this list.
+;SCREEN-ACTIVE-WINDOWS is a list of all windows which appear unshaded on the screen,
+;    most recently selected first.
+;SCREEN-SELECTED-WINDOW is the one which is "selected" for commands.
+;SCREEN-DISPLAY-WINDOWS is a list of special windows which are displayed
+;    but otherwise ignored (are not seen by the mouse, aren't deactivated normally,
+;    can't be selected).  They need only implement the DISPLAY and ACTIVATE operations.
+;If SCREEN-COMPLETE-REDISPLAY is non-NIL, a complete redisplay is required.
+;    (This variable is also a function).
+
+(DECLARE (SETQ OPEN-CODE-MAP-SWITCH T))
+
+(DECLARE (SPECIAL SCREEN-WINDOWS SCREEN-ACTIVE-WINDOWS SCREEN-DISPLAY-WINDOWS
+		  SCREEN-SELECTED-WINDOW SCREEN-COMPLETE-REDISPLAY))
+
+(DECLARE (SPECIAL ED-MOUSE-VISIBILITY MOUSE-REGION-TABLE MOUSE-X MOUSE-Y
+		  EDM-BOX-MOUSE-REGION ED-MOUSE-MODE-LIST MOUSE-BLINKER
+		  TV-SCREEN-WIDTH TV-SCREEN-HEIGHT))
+
+(ENDF HEAD)
+
+(DEFUN SCREEN-INIT ()
+    (SETQ SCREEN-COMPLETE-REDISPLAY NIL)
+    (SETQ SCREEN-WINDOWS NIL)
+    (SETQ SCREEN-DISPLAY-WINDOWS NIL)
+    (SETQ SCREEN-ACTIVE-WINDOWS NIL)
+    (SETQ SCREEN-SELECTED-WINDOW '(LAMBDA (&REST IGNORE) NIL)))
+
+;Enable the screen-manager by activating the screen windows
+;which are on SCREEN-ACTIVE-WINDOWS --
+;the windows which are supposedly now active.
+;Assumes that SCREEN-SELECTED-WINDOW is a dummy window.
+(DEFUN SCREEN-ACTIVATE ()
+   (TV-DEACTIVATE-PC-PPR CONSOLE-IO-PC-PPR)
+   (LET ((SCREEN-WINDOWS NIL)
+	 (SAW SCREEN-ACTIVE-WINDOWS)
+	 (SCREEN-ACTIVE-WINDOWS NIL))
+	(APPLY (FUNCTION SCREEN-SELECT-WINDOWS) SAW)))
+
+; Disable the screen-manager.
+; Deactivate and deselect all windows, but leave SCREEN-ACTIVE-WINDOWS set up so that
+; we can restore the state when we re-enter the editor.
+(DEFUN SCREEN-DEACTIVATE ()
+   (LET ((SCREEN-ACTIVE-WINDOWS SCREEN-ACTIVE-WINDOWS)
+	 (SCREEN-WINDOWS SCREEN-WINDOWS))
+	(SCREEN-SELECT-WINDOWS '(LAMBDA (&REST IGNORE) NIL)))
+   (TV-SET-BLINKER-VISIBILITY MOUSE-BLINKER NIL)
+   (TV-ACTIVATE-PC-PPR CONSOLE-IO-PC-PPR))
+
+;Select a given window.  Returns T if window was not already at least active.
+;Deactivates other windows as appropriate.
+(DEFUN SCREEN-SELECT-WINDOW (WINDOW)
+  (PROG1 (NOT (MEMQ WINDOW SCREEN-ACTIVE-WINDOWS))
+    (COND ((NEQ WINDOW SCREEN-SELECTED-WINDOW)
+	   (FUNCALL SCREEN-SELECTED-WINDOW 'DESELECT)
+	   (SETQ SCREEN-SELECTED-WINDOW WINDOW)
+	   (FUNCALL WINDOW 'SELECT)
+	   (ITER ((STACK W WS SCREEN-ACTIVE-WINDOWS)) NIL
+		 (FETCHR W)
+		 (AND (NEQ WINDOW W)
+		      (FUNCALL WINDOW 'OVERLAPS-P W)
+		      (PROGN (SETQ SCREEN-ACTIVE-WINDOWS (DELQ W SCREEN-ACTIVE-WINDOWS))
+			     (OR (FUNCALL WINDOW 'CONTAINS-P W)
+				 (FUNCALL W 'SHADE))
+			     (FUNCALL W 'DEACTIVATE))))
+	   (OR (MEMQ WINDOW SCREEN-ACTIVE-WINDOWS)
+	       (FUNCALL WINDOW 'ACTIVATE))
+	   (SETQ SCREEN-WINDOWS
+		 (CONS WINDOW (DELQ WINDOW SCREEN-WINDOWS)))
+	   (SETQ SCREEN-ACTIVE-WINDOWS
+		 (CONS WINDOW (DELQ WINDOW SCREEN-ACTIVE-WINDOWS)))))))
+
+(DEFUN SCREEN-SELECT-WINDOWS (&REST WINDOWS)
+    (OR (EQ SCREEN-SELECTED-WINDOW (CAR WINDOWS))
+	(FUNCALL SCREEN-SELECTED-WINDOW 'DESELECT))
+    (ITER ((STACK W WS SCREEN-ACTIVE-WINDOWS)) NIL
+	  (OR (MEMQ (FETCHR W) WINDOWS)
+	      (FUNCALL W 'DEACTIVATE)))
+    (ITER ((STACK W WS (REVERSE WINDOWS))) NIL
+	  (FETCHR W)
+	  (SETQ SCREEN-WINDOWS
+		(CONS W (DELQ W SCREEN-WINDOWS)))
+	  (FUNCALL W 'ACTIVATE))
+    (SETQ SCREEN-ACTIVE-WINDOWS (APPEND WINDOWS NIL))
+    (SETQ SCREEN-SELECTED-WINDOW (CAR WINDOWS))
+    (FUNCALL (CAR WINDOWS) 'SELECT))
+
+;Redisplay all windows as they need it.
+(DEFUN SCREEN-REDISPLAY ()
+    (COND (SCREEN-COMPLETE-REDISPLAY (SCREEN-COMPLETE-REDISPLAY))
+	  (T (DO L SCREEN-ACTIVE-WINDOWS (CDR L) (NULL L)
+		 (FUNCALL (CAR L) 'DISPLAY))
+	     (DO L SCREEN-DISPLAY-WINDOWS (CDR L) (NULL L)
+		 (FUNCALL (CAR L) 'DISPLAY)))))
+
+; This function performs a complete redisplay of everything on the screen.
+(DEFUN SCREEN-COMPLETE-REDISPLAY (&OPTIONAL IGNORE)
+    (TV-CLEAR-SCREEN)
+    (SETQ SCREEN-COMPLETE-REDISPLAY NIL)
+    (SCREEN-RESET)			;Activates everything on SCREEN-ACTIVE-WINDOWS
+    (DO L SCREEN-ACTIVE-WINDOWS (CDR L) (NULL L)
+      (FUNCALL (CAR L) 'DISPLAY))
+    (DO L SCREEN-DISPLAY-WINDOWS (CDR L) (NULL L)
+      (FUNCALL (CAR L) 'ACTIVATE)
+      (FUNCALL (CAR L) 'DISPLAY)))
+
+;This reactivates every window which is supposed to be active
+;and redeactivates every window which is supposed to be inactive.
+;Try calling this if things get screwed up.
+(DEFUN SCREEN-RESET ()
+    (TV-SET-BLINKER-VISIBILITY MOUSE-BLINKER ED-MOUSE-VISIBILITY)
+    (DO L SCREEN-WINDOWS (CDR L) (NULL L)
+	(FUNCALL (CAR L)
+		 (COND ((MEMQ (CAR L) SCREEN-ACTIVE-WINDOWS)
+			'ACTIVATE)
+		       (T 'DEACTIVATE)))))
+
+;Remove a window from the screen, putting it "at the bottom of the heap"
+;to reveal (activate) other windows which had been underneath it.
+(DEFUN SCREEN-BURY-WINDOW (W)
+    (FUNCALL W 'UNOUTLINE)
+    (AND (EQ W SCREEN-SELECTED-WINDOW)
+	 (FUNCALL W 'DESELECT))
+    (AND (MEMQ W SCREEN-ACTIVE-WINDOWS)
+	 (FUNCALL W 'DEACTIVATE))
+    (SETQ SCREEN-ACTIVE-WINDOWS (DELQ W SCREEN-ACTIVE-WINDOWS))
+    (SETQ SCREEN-WINDOWS
+	  (NCONC (DELQ W SCREEN-WINDOWS)
+		 (NCONS W)))
+    (SCREEN-RESURRECT-WINDOWS)
+    (SCREEN-SELECT-WINDOW (CAR SCREEN-WINDOWS))
+    (SETQ SCREEN-COMPLETE-REDISPLAY T))
+
+;Kill a window.
+(DEFUN SCREEN-KILL-WINDOW (W)
+    (SCREEN-BURY-WINDOW W)
+    (FUNCALL W 'KILL))
+
+;Find all windows not currently active which don't overlap
+;anything active, and activate them.
+(DEFUN SCREEN-RESURRECT-WINDOWS ()
+    (DO S SCREEN-WINDOWS (CDR S) (NULL S)
+      (OR (MEMQ (CAR S) SCREEN-ACTIVE-WINDOWS)	;If already active, nothing to do to it.
+	  (DO D SCREEN-ACTIVE-WINDOWS (CDR D) (NULL D)
+	    (AND (FUNCALL (CAR D) 'OVERLAPS-P (CAR S))	;If overlaps active window, can't activate.
+		 (RETURN T)))				;  then done.
+	  (PROGN (FUNCALL (CAR S) 'ACTIVATE)
+		 (PUSH (CAR S) SCREEN-ACTIVE-WINDOWS)))))
+
+;Alter the position or size of a window.  We specify a rectangle;
+;non-rectangular windows should fit their circumscribing rectangles to it.
+;If SHADE-P is NIL, we assume that the old image was already shaded and unoutlined.
+(DEFUN SCREEN-REDEFINE-WINDOW (WINDOW X1 Y1 X2 Y2 &OPTIONAL (SHADE-P T))
+    (COND (SHADE-P
+	   (FUNCALL WINDOW 'SHADE)
+	   (FUNCALL WINDOW 'UNOUTLINE)))
+    (FUNCALL WINDOW 'SET-EDGES X1 Y1 X2 Y2)
+    (FUNCALL WINDOW 'ACTIVATE)
+    (SCREEN-RESURRECT-WINDOWS))
+
+;Given a window W, which need not be selected or even active,
+;move it by attaching the mouse to it and letting the mouse pull it.
+(DEFUN SCREEN-MOVE-WINDOW-MOUSE (W &AUX X1 X2 Y1 Y2 X2A Y2A)
+  (LET ((ED-MOUSE-VISIBILITY T)
+	(MOUSE-REGION-TABLE (LIST EDM-BOX-MOUSE-REGION)))
+    (ED-BIND-MODE-LINE "Move Window" ED-MOUSE-MODE-LIST
+	(MULTIPLE-VALUE (X1 Y1 X2 Y2) (FUNCALL W 'EDGES))
+	(SETQ X2A X2 Y2A Y2)
+	(AND (MEMQ W SCREEN-ACTIVE-WINDOWS) (FUNCALL W 'SHADE))
+	(MOUSE-SET-POS X1 Y1)
+	(DO ()
+	    ((ZEROP (MOUSE-BUTTON-WORD)))   ;Do until button lifted.
+	  (COND ((MOUSE-FOLLOW)
+		 (ED-DRAW-BOX X1 Y1 X2A Y2A)  ;Erase old box.
+		 (SETQ X2 (+ X2 (- MOUSE-X X1))
+		       Y2 (+ Y2 (- MOUSE-Y Y1))
+		       X1 MOUSE-X
+		       Y1 MOUSE-Y)
+		 (SETQ X2A (MIN X2 TV-SCREEN-WIDTH)
+		       Y2A (MIN Y2 TV-SCREEN-HEIGHT))
+		 (ED-DRAW-BOX X1 Y1 X2A Y2A))))	;  draw new box.
+	(ED-DRAW-BOX X1 Y1 X2A Y2A)		;Erase box, all done.
+	(SCREEN-REDEFINE-WINDOW W X1 Y1 X2A Y2A NIL)))
+  (TV-SET-BLINKER-VISIBILITY MOUSE-BLINKER ED-MOUSE-VISIBILITY))
+
+(DEFUN SCREEN-ADJUST-WINDOW-SIZE-MOUSE (W &AUX X1 X2 Y1 Y2)
+  (LET ((ED-MOUSE-VISIBILITY T)
+	(MOUSE-REGION-TABLE (LIST EDM-BOX-MOUSE-REGION)))
+    (ED-BIND-MODE-LINE "Adjust Window Size" ED-MOUSE-MODE-LIST
+	(MULTIPLE-VALUE (X1 Y1 X2 Y2) (FUNCALL W 'EDGES))
+	(AND (MEMQ W SCREEN-ACTIVE-WINDOWS) (FUNCALL W 'SHADE))
+	(MOUSE-SET-POS X2 Y2)
+	(DO ()
+	    ((ZEROP (MOUSE-BUTTON-WORD)))   ;Do until button lifted.
+	  (COND ((MOUSE-FOLLOW)
+		 (ED-DRAW-BOX X1 Y1 X2 Y2)  ;Erase old box.
+		 (SETQ X2 MOUSE-X
+		       Y2 MOUSE-Y)
+		 (ED-DRAW-BOX X1 Y1 X2 Y2))))	;  draw new box.
+	(ED-DRAW-BOX X1 Y1 X2 Y2)		;Erase box, all done.
+	(SCREEN-REDEFINE-WINDOW W X1 Y1 X2 Y2 NIL)))
+  (TV-SET-BLINKER-VISIBILITY MOUSE-BLINKER ED-MOUSE-VISIBILITY))
+

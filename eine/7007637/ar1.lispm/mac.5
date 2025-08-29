@@ -1,0 +1,64 @@
+;-*-LISP-*-
+
+(DECLARE (SPECIAL MACRO-REPEAT-MODE			;T => We are in a repeat.
+		  MACRO-LEVEL				;Number from 0 to 7
+		  MACRO-BUFFER				;Buffer of characters typed.
+		  MACRO-ESCAPE-CHAR			;The character prefix for macro cmnds.
+		  MACRO-ARRAY				;Array of structures, one per level.
+		  MACRO-INPUT-DISPATCH			;Per character dispatch table for
+		  MACRO-EXECUTE-DISPATCH		;    macro characters.
+		  MACRO-INDEX				;In repeat mode, where we are up to.
+		  ))
+
+(DEFSTRUCT NIL ARRAY
+	   MACRO-INDEX					;Pointer to buffer of where we are now.
+	   MACRO-START-INDEX				;    ...where this macro starts
+	   MACRO-STOP-INDEX				;    ...where this macro stops
+	   MACRO-COUNT					;How many times we have gone around
+	   MACRO-TIMES					;Number of times to go around.
+	   )
+
+(DEFUN MACRO-IO-TYI (&AUX CHAR)
+    (SETQ CHAR (FUNCALL STREAM 'TYI))
+    (COND ((NULL CHAR) NIL)
+	  ((NOT (= CHAR MACRO-ESCAPE-CHAR)) CHAR)
+	  ((NULL (SETQ CHAR (FUNCALL STREAM 'TYI))) NIL)
+	  (T (FUNCALL (AR-1 MACRO-INPUT-DISPATCH CHAR)))))	;CHECK FOR "CHAR" TOO BIG?
+
+(DEFUN MACRO-IO (OP &OPTIONAL ARG1 &AUX CHAR S)
+    (COND ((NEQ OP 'TYI) (FUNCALL STREAM OP ARG1))
+	  (T (PROG (CHAR)
+	     START (AND MACRO-REPEAT-MODE (GO REPEAT-MODE))
+	           (OR (SETQ CHAR (MACRO-IO-TYI)) (GO EOF))
+		   (COND ((NUMBERP CHAR) (RETURN CHAR))
+			 ((NLISTP CHAR) (ERROR "Lose big."))
+			 ((EQ (CAR CHAR) 'MACRO-START)
+			  (SETQ MACRO-LEVEL (1+ MACRO-LEVEL))
+			  (SETQ S (AR-1 MACRO-ARRAY MACRO-LEVEL))
+			  (OR S (AS-1 (MACRO-ALLOCATE) MACRO-ARRAY MACRO-LEVEL))
+			  (SETF (MACRO-START-INDEX S) (ARRAY-LEADER MACRO-BUFFER 0))
+			  (GO START))
+			 ((EQ (CAR CHAR) 'MACRO-REPEAT)
+			  (SETQ S (AR-1 MACRO-ARRAY MACRO-LEVEL))
+			  (SETF (MACRO-COUNT S) 0)
+			  (SETF (MACRO-TIMES S) (CADR CHAR))
+			  (SETF (MACRO-STOP-INDEX S) (ARRAY-LEADER MACRO-BUFFER 0))
+			  (SETQ MACRO-INDEX (MACRO-START-INDEX S))
+			  (SETQ MACRO-REPEAT-MODE T)
+			  (GO REPEAT-MODE))
+			 ;; Handle other stuff
+			 (T (ERROR "Bite the bag.")))
+
+	     REPEAT-MODE
+	           (SETQ S (AR-1 MACRO-ARRAY MACRO-LEVEL))
+		   (SETQ CHAR (AR-1 MACRO-BUFFER MACRO-INDEX))
+		   (COND ((
+
+
+		   (COND ((>= (MACRO-INDEX S) (MACRO-STOP-INDEX S))
+			  (SETF (MACRO-INDEX S) (MACRO-START-INDEX S))
+			  (SETF (MACRO-COUNT S) (1+ (MACRO-COUNT S)))
+			  (COND ((>= (MACRO-COUNT S) (MACRO-TIMES S))
+				 (SETQ MACRO-LEVEL (1- MACRO-LEVEL))
+				 ------))))
+		   

@@ -1,0 +1,43 @@
+>>> NEW HAIR FOR MULTIPLE WINDOW HACKING
+
+> Two functions:
+ED-SELECT-WINDOW takes a window, activates it, pulls it to the top, and deactivates
+anything it covers up.  This is primarily good for mouse stuff.
+
+ED-SELECT-WINDOWS takes a window and the REST of windows.  All of them become
+the only active windows, and are all pulled to the top.
+
+> Problem in that ED-RECURSE still wants to mung with ED-WINDOWS-DISPLAYED by itself;
+so for now we have the Cant Hack Screen mode in effect for it (ED-WINDOW-HACKING-OK-P
+bound to NIL.)
+
+
+>>> USERS OF THE DEBUG STUFF:
+
+>> Users of ed-debug-stream:
+    ED-CREATE-LINE and -BUFFER (only in DEBUG mode)
+    ED-INIT creates it
+    ED-TOP-LEVEL binds print-default-output-dest to it
+    ED-BARF uses it, and so does ED-COMMAND-EXECUTE
+
+>> Users of ed-debug-pc-ppr:
+    ED-INIT creates it, and uses it for debug-stream
+    ED-RECOVER deactivates it
+    ED-COMPLETE-REDISPLAY clears it
+    ED-TOP-LEVEL binds console-io-pc-ppr to it
+    ED-BARF uses it
+
+>>> PROPOSAL
+
+If ED-DEBUG-P is T, everything as it is now.
+
+If ED-DEBUG-P is NIL, then (EQ ED-DEBUG-PC-PPR CONSOLE-IO-PC-PPR) and
+   (EQ ED-DEBUG-STREAM (FUNCTION CONSOLE-IO))
+
+>> Problems?
+
+Flush CREATE hacks!
+ED-INIT hair!!
+ED-BARF, if (NOT ED-DEBUG-P) will have to SCREEN-MUNGED.
+ED-RECOVER care.
+ED-COMPLETE-REDISPLAY should only clear if ED-DEBUG-P

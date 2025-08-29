@@ -1,0 +1,627 @@
+;;; This file is part of EINE, the Lisp Machine editor.        -*-LISP-*-
+;;; For more information see LISPM2;EINE INFO.
+
+;; This file contains DISPLAY UPDATE functions.
+
+(DECLARE (SETQ RETAIN-VARIABLE-NAMES-SWITCH 'ARGS))
+(DECLARE (SETQ OPEN-CODE-MAP-SWITCH T))
+
+;; WINDOW STATES:
+; A window can be "off the screen," in which case it is dead to the world, unseen,
+;   and never updated.  Windows on the screen can be INACTIVE or ACTIVE.  An ACTIVE
+;   window has a blinker at which you type to do things such as inserting text.
+;   This blinker is associated with a buffer pointer (for the moment only one blinker
+;   per window, associated always with the point, although we might consider one for 
+;   the mark).  This blinker must always be on the screen, and must always reflect its bp.
+;   Thus if the bp is moved to a part of the buffer which is not being displayed, the
+;   TOP-LINE-DISPLAYED of the window must be changed.  But if possible the TOP-LINE-
+;   DISPLAYED should be left alone since it would cause unneccesary redisplay.
+;   An INACTIVE window is kept up to date, but we never compute a new TOP-LINE-DISPLAYED
+;   for it; this is so you can look at two parts of the same buffer and win, and also
+;   look at the same part of the same buffer and win.  An inactive window's point-blinker
+;   is displayed as a "non-blinking blinker."
+;   The low level does not know about states of windows.  The middle level knows about 
+;   states, but not where to find window in given states.  The high level knows where
+;   the windows are to be found:
+
+;; DATA STRUCTURE: WHERE ARE THE WINDOWS?
+; For now, there will be only one active window, which will be in the value
+;   of ED-WINDOW.  All windows on the screen will be kept on the list ED-WINDOWS-DISPLAYED,
+;   and all windows in the world will be kept on ED-WINDOWS.  The two principal kinds
+;   of commands for the user to redisplay will be to compute a new TOP-LINE-DISPLAYED
+;   for ED-WINDOW, and to completely redisplay the whole screen.
+; There is also a hack now mainly for the minibuffer, as follows:  if a window
+;   is on the screen but doesnt want to be displayed, it can be put on ED-WINDOWS-DISPLAYED
+;   but with its ED-WINDOW-BLIND set to T (i.e. pull down the blinds on the window).
+;   The minibuffer is normally in this state.
+; To keep the blinkers in the right state, whenever a fuction changes ED-WINDOW and/or
+;   ED-WINDOWS-DISPLAYED it should call ED-RESET-BLINKER-VISIBILITY, which will get
+;   everybody's POINT-BLINKER into the right state:  For ED-WINDOW it should be BLINK,
+;   for displayed unblinded windows it should be T, and for everyone else NIL.
+
+; HOW MUCH TO REDISPLAY:
+;   Two variables are used: ED-REDISPLAY-DEGREE and ED-REDISPLAY-DEGREE-THIS-LEVEL.
+; The degrees of redisplay are in the valudes of the symbols ED-DIS-NONE,
+; ED-DIS-BPS, ED-DIS-BUFFER, and ED-DIS-SCREEN. NONE means no redisplay is needed.
+; BPS means no text has been changed, but BP positions might have.  BUFFER means
+; text has changed, but only in this buffer.  SCREEN means nasty things have happened
+; and the whole screen needs to be displayed.
+; The value returned by an EINE command is treated as such a degree, and the function
+; ED-MUST-REDISPLAY is called on that degree.  However, internal functions may also
+; call ED-MUST-REDISPLAY on any degree they want, so that they need not return it as a value
+; to the calling ED-COM- function.
+;   ED-MUST-REDISPLAY takes its argument, and MAXes it into ED-REDISPLAY-DEGREE and
+; ED-REDISPLAY-DEGREE-THIS-LEVEL.  Thus the number being saved is the most severe
+; degree anyone deemed necessary.  After an ED-COM- is done, ED-REDISPLAY-DEGREE is
+; examined and an appropriate amount of redisplay is done, and ED-REDISPLAY-DEGREE is
+; set to ED-DIS-NONE.  ED-REDISPLAY-DEGREE-THIS-LEVEL is only used by ED-RECURSE,
+; so as to pass up the information to the caller.  (That is hairy...)
+;   SPECIAL HACK #1 to above:  If an ED-COM- returns the symbol ED-SPECIAL, then
+; it is a prefix command like numbers or ^U which means that things like the numeric arg should
+; not be reset, and no redisplay should happen this time.
+;   SPECIAL HACK #2 to above:  If someone sets ED-SPECIAL-SCREEN-P then there is stuff
+; on the screen like documentation or an error message.  Don't redisplay this
+; time, but set up for complete redisplay NEXT time by doing an (ED-MUST-REDISPLAY
+; ED-DIS-SCREEN).
+
+(DEFUN ED-MUST-REDISPLAY (DEGREE)
+    (OR (NUMBERP DEGREE) (ERROR " is not a number." DEGREE))
+    (SETQ ED-REDISPLAY-DEGREE (MAX ED-REDISPLAY-DEGREE DEGREE)
+	  ED-REDISPLAY-DEGREE-THIS-LEVEL (MAX ED-REDISPLAY-DEGREE-THIS-LEVEL DEGREE))
+    NIL)
+
+;; LOW LEVEL FUNCTIONS FOR REDISPLAY.
+
+;Basic idea: each line knows the time at which it was last altered. This is the
+;   ED-LINE-MUNGED parameter.  Each window knows the last time it was brought up to date
+;   the ED-WINDOW-UNMUNGED parameter.  When text is altered, the LINE's parameter is changed
+;   but never the window's.  When redisplay is done, the WINDOW's parameter is changed,
+;   but never the line's.  The time is kept by ED-TICK, which is incremented whenever
+;   something interesting happens.  Whenever a line's contents is altered, ED-MUNG
+;   should be run:
+
+(DEFUN ED-TICK ()
+    (PROG1 ED-TICK (SETQ ED-TICK (1+ ED-TICK))))
+
+(DEFUN ED-MUNG (LINE)
+    (SETF (ED-LINE-MUNGED LINE) (ED-TICK)))
+
+;  This will tell the redisplay that the line has changed and must be updated.
+
+; ED-WINDOW-1 and ED-WINDOW-2 make a "first pass" to figure out a good "TOP-LINE-DISPLAYED"
+;    parameter for an active window in which there is a bp associated with a blinker 
+;    which MUST end up on the screen.
+
+; ED-WINDOW-1 takes three arguments: a buffer pointer, a line number, and a window.
+;    It returns the correct LINE-NUM to be displayed at the top of the screen, and
+;    the X and Y coordinates of where to display the cursor.
+;   It knows that the buffer pointer must get dislayed on the screen but it would
+;    be desirable if the line addressed by the line number argument could manage
+;    to be the top line displayed.
+; How it works:  
+; First, if LINE-NUM is after the BP, we can't win on LINE-NUM. 
+;   It first scans down from LINE-NUM, using TV-COMPUTE-MOTION, until it gets to the
+;    BP [in which case we win if it is in range of MIN-RASTER and MAX-RASTER]
+;    or falls off the screen.  If we decide then that there
+;    is no way to get LINE-NUM to win, then we return NIL and DESIRED-RASTERS-ABOVE,
+;    which the user may or may not want to pass on to ED-WINDOW-2.
+;    The DESIRED-RASTERS-ABOVE are taken from the 
+;    window's array leader, MAX-RESET-RASTER and MIN-RESET-RASTER.
+;
+;
+; ED-WINDOW-2 takes three arguments, a buffer pointer, a number of raster lines, and
+;    a window.  It returns the same things that ED-WINDOW-1 does.
+;   It tries to figure out a way to redisplay so that the distance above the cursor 
+;    will be that many raster lines.  It never passes on to ED-WINDOW-1 since that would
+;    be a crock.  It just tries hard, and if you give it ridiculous args it will return
+;    something that is certain to work.
+;
+;
+; ED-WINDOW-3 is the function which does the actual TV operations.  It looks at each
+;    line and if the line has not changed since the last redisplay it doesn't 
+;    redisplay it.  If you specifically desire to redisplay all lines regardless
+;    of whether it is needed or not, you can artificially MUNG all the lines
+;    in the buffer.
+;
+; ED-WINDOW-4 is in charge of fixing up the blinkers so that they are in
+;    the right place on the screen, or invisible if off the screen.
+
+(DEFUN ED-WINDOW-1 (BP WINDOW)
+    (PROG (LINE-NUM X Y OFF DESIRED-RASTERS-ABOVE PC-PPR BUFFER TOP-LINE-NUM)
+	  (SETQ X 0 Y 0)
+	  (SETQ TOP-LINE-NUM (ED-WINDOW-TOP-LINE-DISPLAYED WINDOW))
+	  (SETQ BUFFER (ED-WINDOW-BUFFER WINDOW))
+	  (SETQ LINE-NUM (ED-BP-LINE-NUM BP))
+	  (SETQ PC-PPR (ED-WINDOW-PC-PPR WINDOW))
+	  (AND (< LINE-NUM TOP-LINE-NUM)
+	       (GO LOSE-OFF-TOP))
+	  (DO ((L TOP-LINE-NUM (1+ L)))
+	      ((>= L LINE-NUM)
+	       (MULTIPLE-VALUE (X Y OFF)
+			       (TV-COMPUTE-MOTION PC-PPR X Y (AR-1 BUFFER L)
+						  0 (ED-BP-CHAR-POS BP) NIL))
+	       (COND ((OR OFF
+			  (> Y (ED-WINDOW-MAX-RASTER WINDOW)))
+		      (GO LOSE-OFF-BOTTOM))
+		     ((< Y (ED-WINDOW-MIN-RASTER WINDOW))
+		      (GO LOSE-OFF-TOP))
+		     (T (GO WIN))) )
+
+	    (OR (AR-1 BUFFER L) (ERROR "NIL IN BUFFER???  --  ED-WINDOW-1"))
+	    (MULTIPLE-VALUE (X Y OFF)
+			    (TV-COMPUTE-MOTION PC-PPR X Y (AR-1 BUFFER L) 0 NIL T))
+	    (AND OFF (GO LOSE-OFF-BOTTOM)))
+     LOSE-OFF-BOTTOM
+	  (SETQ DESIRED-RASTERS-ABOVE (ED-WINDOW-MAX-RESET-RASTER WINDOW))
+	  (GO LOSE)
+     LOSE-OFF-TOP
+          (SETQ DESIRED-RASTERS-ABOVE (ED-WINDOW-MIN-RESET-RASTER WINDOW))
+     LOSE (RETURN NIL DESIRED-RASTERS-ABOVE)
+      WIN (RETURN X Y)))
+
+;This is a modified version of ED-WINDOW-1.  It takes a BP, a possible TOP-LINE-NUM, and
+;   a window, and tells you whether the BP will be on the screen if set to the given
+;   TOP-LINE-NUM.  This will be used by the higher level functions interested in inactive
+;   windows.
+
+(DEFUN ED-WINDOW-1-A (BP WINDOW)
+    (PROG (LINE-NUM X Y OFF DESIRED-RASTERS-ABOVE PC-PPR BUFFER TOP-LINE-NUM)
+	  (SETQ X 0 Y 0)
+	  (SETQ TOP-LINE-NUM (ED-WINDOW-TOP-LINE-DISPLAYED WINDOW))
+	  (SETQ BUFFER (ED-WINDOW-BUFFER WINDOW))
+	  (SETQ LINE-NUM (ED-BP-LINE-NUM BP))
+	  (SETQ PC-PPR (ED-WINDOW-PC-PPR WINDOW))
+	  (AND (< LINE-NUM TOP-LINE-NUM)
+	       (GO LOSE))
+	  (DO ((L TOP-LINE-NUM (1+ L)))
+	      ((>= L LINE-NUM)
+	       (MULTIPLE-VALUE (X Y OFF)
+			       (TV-COMPUTE-MOTION PC-PPR X Y (AR-1 BUFFER L)
+						  0 (ED-BP-CHAR-POS BP) NIL))
+	       (COND (OFF (GO LOSE))
+		     (T (GO WIN))))
+
+	    (OR (AR-1 BUFFER L) (ERROR "NIL IN BUFFER???  --  ED-WINDOW-1-A"))
+	    (MULTIPLE-VALUE (X Y OFF)
+			    (TV-COMPUTE-MOTION PC-PPR X Y (AR-1 BUFFER L) 0 NIL T))
+	    (AND OFF (GO LOSE)))
+     LOSE (RETURN NIL 0 0)
+      WIN (RETURN T X Y)))
+
+(DEFUN ED-WINDOW-2 (BP RASTERS WINDOW)	     ;ED-WINDOW-END-RASTER
+    (PROG (X Y OFF TEM PC-PPR BUFFER)
+	  (SETQ BUFFER (ED-WINDOW-BUFFER WINDOW))
+	  (SETQ PC-PPR (ED-WINDOW-PC-PPR WINDOW))
+	  (SETQ RASTERS (MAX (ED-WINDOW-MIN-RASTER WINDOW)
+			     (MIN (ED-WINDOW-MAX-RASTER WINDOW)
+				  RASTERS)))
+	  (MULTIPLE-VALUE (X Y OFF)
+			  (TV-COMPUTE-MOTION PC-PPR 0 0 (ED-BP-LINE BP)
+					     0 (ED-BP-CHAR-POS BP) NIL))
+	  (AND OFF (ED-BARF "Line ridiculously long -- ED-WINDOW-2"))
+	  (DO ((L (1- (ED-BP-LINE-NUM BP)) (1- L)))
+	      ((MINUSP L) (SETQ TEM 0))
+            (COND ((>= Y RASTERS)
+		   (SETQ TEM (1+ L))
+		   (RETURN NIL)))
+	    (MULTIPLE-VALUE (NIL TEM OFF)
+			    (TV-COMPUTE-MOTION PC-PPR 0 0 (AR-1 BUFFER L)
+					       0 NIL T))
+	    (AND OFF (ED-BARF "Line ridiculously long -- ED-WINDOW-2"))
+	    (SETQ Y (+ Y TEM)))
+	  (RETURN TEM X Y)))
+
+(DEFUN ED-WINDOW-3 (TOP-LINE-NUM WINDOW &AUX LIM BUFFER BOTTOM-LINE-NUM 
+			PC-PPR LINE-HEIGHT UNMUNGED MAX-PLINE PLINE)
+    (SETQ PC-PPR (ED-WINDOW-PC-PPR WINDOW))
+    (SETQ BUFFER (ED-WINDOW-BUFFER WINDOW))
+    (SETQ LINE-HEIGHT (PC-PPR-LINE-HEIGHT PC-PPR))
+    (SETQ UNMUNGED (ED-WINDOW-UNMUNGED WINDOW))
+    (SETF (ED-WINDOW-UNMUNGED WINDOW) ED-TICK)
+    (SETF (ED-WINDOW-TOP-LINE-DISPLAYED WINDOW) TOP-LINE-NUM)
+    (SETQ ED-TICK (1+ ED-TICK))
+    (SETQ LIM (ED-BUFFER-FILL-POINTER BUFFER))
+    (SETQ MAX-PLINE (ED-WINDOW-FILL-POINTER WINDOW))
+    (SETQ PLINE 0)
+    (SETQ BOTTOM-LINE-NUM				;LINE NUM OF LAST LINE DISPLAYED.
+	  (*CATCH 'ED-WINDOW-3
+		  (DO ((LINE-NUM TOP-LINE-NUM (1+ LINE-NUM))
+		       (LINE))
+		      ((>= LINE-NUM LIM) (1- LINE-NUM))
+		    (AND (>= PLINE MAX-PLINE) (RETURN (1- LINE-NUM)))
+		    (SETQ LINE (AR-1 BUFFER LINE-NUM))
+		    (OR LINE (ERROR "NIL IN BUFFER??? -- ED-WINDOW-3"))
+		    (COND ((AND (EQ (AR-2 WINDOW PLINE 0);SKIP OVER CONT. LINES OF A LINE
+				    LINE)		; WHICH DOESN'T NEED TO BE DISPLAYED
+				(< (ED-LINE-MUNGED LINE)
+				   UNMUNGED))
+			   (DO I (1+ PLINE) (1+ I) (OR (>= I MAX-PLINE)
+						       (NEQ (AR-2 WINDOW I 0) -1))
+			     (SETQ PLINE I))
+			   )
+			  (T				;DISPLAY THIS LINE
+			   (TV-SET-CURSORPOS PC-PPR 0 (* LINE-HEIGHT PLINE))
+			   (TV-CLEAR-EOL PC-PPR)
+			   (DO ((IND LINE -1)		;LOOP OVER CONTINUATION LINES
+				(IDX 0))
+			       ((>= PLINE MAX-PLINE)
+				(*THROW 'ED-WINDOW-3 LINE-NUM))
+			     (AS-2 IND WINDOW PLINE 0)
+			     (AS-2 NIL WINDOW PLINE 1)
+			     (OR (SETQ IDX (TV-LINE-OUT PC-PPR LINE IDX))
+				 (RETURN NIL))		;RETURN IF NOT CONTINUED
+			     (SETQ PLINE (1+ PLINE)))))
+		    (SETQ PLINE (1+ PLINE))
+	      )))
+
+    (DO I PLINE (1+ I) (>= I MAX-PLINE)			;Clear out the rest of the window.
+      (COND ((NOT (NULL (AR-2 WINDOW I 0)))
+	     (AS-2 NIL WINDOW I 0)
+	     (AS-2 NIL WINDOW I 1)
+	     (TV-SET-CURSORPOS PC-PPR 0 (* I LINE-HEIGHT))
+	     (TV-CLEAR-EOL PC-PPR))))
+
+ )
+
+(DEFUN ED-WINDOW-4 (WINDOW X Y &AUX BLINKERS B PLINE TEM MAX-PLINE
+			   TOP-NUM BOTTOM-NUM LINE-HEIGHT PC-PPR BUFFER)
+    (AND X						;HACK FOR ED-WINDOW-BLINKER-UPDATE.
+	 (TV-SET-BLINKER-CURSORPOS (ED-WINDOW-POINT-BLINKER WINDOW) X Y))
+    (COND ((SETQ BLINKERS (ED-WINDOW-OTHER-BLINKERS WINDOW))
+	   (SETQ MAX-PLINE (ED-WINDOW-FILL-POINTER WINDOW)
+		 BUFFER (ED-WINDOW-BUFFER WINDOW)
+		 PC-PPR (ED-WINDOW-PC-PPR WINDOW)
+		 TOP-NUM (ED-LINE-NUMBER (AR-2 WINDOW 0 0))
+		 BOTTOM-NUM (COND ((NOT (NULL (AR-2 WINDOW (1- MAX-PLINE) 0)))
+				   (DO ((X (1- MAX-PLINE) (1- X)))
+				       ((NOT (= (SETQ TEM (AR-2 WINDOW X 0)) -1))))
+				   (ED-LINE-NUMBER TEM))
+				  (T (1- (ED-BUFFER-FILL-POINTER (ED-WINDOW-BUFFER WINDOW)))))
+		 LINE-HEIGHT (PC-PPR-LINE-HEIGHT (ED-WINDOW-PC-PPR WINDOW)))
+	   (DO L BLINKERS (CDR L) (NULL L)
+	     (SETQ B (CAR L))
+	     (SETQ TEM (ED-BP-LINE-NUM (FIRST B)))
+	     (COND ((OR (NEQ BUFFER (ED-LINE-BUFFER (ED-BP-LINE (FIRST B))))
+			(< TEM TOP-NUM)
+			(> TEM BOTTOM-NUM))
+		    (TV-SET-BLINKER-VISIBILITY (SECOND B) NIL))
+		   (T
+		    (SETQ TEM (ED-BP-LINE (FIRST B)))
+		    (SETQ PLINE (DO I 0 (1+ I) (= I MAX-PLINE)
+				  (AND (EQ TEM (AR-2 WINDOW I 0))
+				       (RETURN I))))
+		    (OR PLINE (ERROR "Inconsistent data structure -- ED-WINDOW-4"))
+		    (MULTIPLE-VALUE (X Y TEM)
+				    (TV-COMPUTE-MOTION PC-PPR 0 (* LINE-HEIGHT PLINE) TEM
+						       0 (ED-BP-CHAR-POS (FIRST B))))
+		    (COND ((NULL TEM)
+			   (TV-SET-BLINKER-CURSORPOS (SECOND B) X Y)
+			   (TV-SET-BLINKER-VISIBILITY (SECOND B) (THIRD B)))
+			  (T
+			   (TV-SET-BLINKER-VISIBILITY (SECOND B) NIL)))))))))
+
+;; The main loop is run once for every PLINE (Physical LINE).
+;; There are four major state variables: LEFT-SAVED, RIGHT-SAVED, LEFT-CNT, RIGHT-CNT.
+;; When the beginning of a line is seen (that is, (NEQ LINE -1) ), these are set up.
+;; The SAVED is the X position of that end of the underlining on this line (not pline).
+;; The CNT is the number of raster lines at which this end of the underlining
+;; lives, relative to the place at which the beginning of the line is displayed.
+;; The CNT variables count down by PC-PPR-LINE-HEIGHT each time around the loop.
+;; Thus, when LEFT-CNT gets to zero, then we are on the PLINE on which 
+;; the left end of this line's underlining is.
+;; If there is no underlining on this line (not pline), RIGHT-SAVED will be NIL.
+;; Phase 1 sets up the four state variables if the beginning of a line is seen.
+;; Phase 2 figures out the LEFT and RIGHT x-positions of the underlining on this
+;; PLINE, and GOs to one of two parts of phase 3, one for no underlining and one for yes.
+;; Phase 3 actually sees to it that that section of this PLINE is so displayed.
+;;  It also updates the saved positions in the window.
+
+(DEFUN ED-WINDOW-5 (BP1 BP2 WINDOW REGION-MARK-P &AUX LINE-NUM-1 LINE-NUM-2
+			PC-PPR OFFSET HEIGHT LINE-HEIGHT WIDTH PC-PPR-L)
+   (COND (ED-REGION-MARKING-MODE
+	  (SETQ PC-PPR (ED-WINDOW-PC-PPR WINDOW)
+		OFFSET (ED-WINDOW-REGION-MARKING-OFFSET WINDOW)
+		HEIGHT (ED-WINDOW-REGION-MARKING-HEIGHT WINDOW)
+		LINE-HEIGHT (PC-PPR-LINE-HEIGHT PC-PPR)
+		PC-PPR-L (PC-PPR-LEFT-MARGIN PC-PPR)
+		WIDTH (- (PC-PPR-RIGHT-MARGIN PC-PPR) PC-PPR-L))
+	  (COND ((NULL REGION-MARK-P)			;We shouldn't mark anything.
+		 (SETQ LINE-NUM-1 -1			;  So fake out below into thinking
+		       LINE-NUM-2 -1))			;  that no lines are in the region.
+		(T
+		 (MULTIPLE-VALUE (BP1 BP2)		;Else properly set up the bounds
+				 (ED-ORDER-BPS BP1 BP2))	;  of the region.
+		 (SETQ LINE-NUM-1 (ED-BP-LINE-NUM BP1)
+		       LINE-NUM-2 (ED-BP-LINE-NUM BP2))))
+ ;; Here is the main loop.  (I know the indentation is wrong...)
+ (DO ((PLINE 0 (1+ PLINE))				;Pline index into window
+      (Y-POS (+ OFFSET (PC-PPR-TOP-MARGIN PC-PPR))	;Where to draw underline
+	     (+ Y-POS LINE-HEIGHT))
+      (LINE) (LINE-NUM) (LEFT) (RIGHT) (LEFT-SAVED) (RIGHT-SAVED)  ;Aux variables
+      (LEFT-CNT 0 (- LEFT-CNT LINE-HEIGHT))		;Decrementing counts
+      (RIGHT-CNT 0 (- RIGHT-CNT LINE-HEIGHT))
+      (LIMIT (1- (ED-WINDOW-FILL-POINTER WINDOW))))	;Loop limit
+     ((> PLINE LIMIT) NIL)
+   (SETQ LINE (AR-2 WINDOW PLINE 0))
+ ;; PHASE 1 - set up the 4 state variables
+ (COND ((NULL LINE) (RETURN NIL))			;Rest of window is blank, done.
+       ((NEQ LINE -1)					;First Pline of a Line
+        (SETQ LINE-NUM (ED-LINE-NUMBER LINE))
+        (COND ((OR (< LINE-NUM LINE-NUM-1)		;If outside region,
+		   (> LINE-NUM LINE-NUM-2))
+ 	      (SETQ RIGHT-SAVED NIL))			; no underlining on any pline
+ 	     (T
+ 	      (COND ((= LINE-NUM LINE-NUM-1)		;If at start of region
+ 		     (MULTIPLE-VALUE (LEFT-SAVED LEFT-CNT)	;compute where it starts
+ 				     (TV-COMPUTE-MOTION PC-PPR 0 0 (ED-BP-LINE BP1)
+ 							0 (ED-BP-CHAR-POS BP1))))
+ 		    (T (SETQ LEFT-SAVED 0 LEFT-CNT 0)))	;If inside region, use beg of line
+ 	      (COND ((= LINE-NUM LINE-NUM-2)		;If at end of region
+ 		     (MULTIPLE-VALUE (RIGHT-SAVED RIGHT-CNT)	;compute where it ends
+ 				     (TV-COMPUTE-MOTION PC-PPR 0 0 (ED-BP-LINE BP2)
+ 							0 (ED-BP-CHAR-POS BP2))))
+ 		    (T (MULTIPLE-VALUE (RIGHT-SAVED RIGHT-CNT)	;If inside region, compute
+ 				       (TV-COMPUTE-MOTION PC-PPR 0 0 LINE))))	;line length
+ 	      
+ 	      ))))
+ 
+ ;; PHASE 2: Now, set up RIGHT and LEFT, based on the CNT and SAVED variables.
+ (COND (RIGHT-SAVED					;If there is any marking wanted here
+        (COND ((> LEFT-CNT 0) (GO NOMARK))		;Above mark, none this pline
+	      ((= LEFT-CNT 0) (SETQ LEFT LEFT-SAVED))	;Start on this pline at saved place
+	      (T (SETQ LEFT 0)))			;Started already, do whole pline
+        (COND ((< RIGHT-CNT 0) (GO NOMARK))		;Finished already, none this pline
+	      ((= RIGHT-CNT 0) (SETQ RIGHT RIGHT-SAVED));Finish on this pline at saved place
+	      (T (SETQ RIGHT WIDTH)))			;Middle, use WIDTH of whole PC-PPR
+	(GO MARK)))
+ 
+ ;;No marking wanted on this line, so none on this pline
+ NOMARK	
+        (AND (AR-2 WINDOW PLINE 1)			; then if there is anything here
+	     (TV-ERASE (AR-2 WINDOW PLINE 2) HEIGHT
+		       (+ PC-PPR-L (AR-2 WINDOW PLINE 1))
+		       Y-POS TV-ALU-XOR))		; then get rid of it.
+	(AS-2 NIL WINDOW PLINE 1)			;Indicate nothing here
+        (GO NEXTLOOP)
+ 
+ ;; PHASE 3: This PLINE should be marked from LEFT to RIGHT.
+ MARK	
+ (COND ((AND (EQ LEFT (AR-2 WINDOW PLINE 1))		;If what we want is already here
+	     (EQ (- RIGHT LEFT) (AR-2 WINDOW PLINE 2))))	; then do nothing
+       (T
+        (AND (AR-2 WINDOW PLINE 1)			;If there is stuff on this line,
+	     (TV-ERASE (AR-2 WINDOW PLINE 2) HEIGHT
+		       (+ PC-PPR-L (AR-2 WINDOW PLINE 1))
+		       Y-POS TV-ALU-XOR))		; then get rid of it.
+        (TV-ERASE (AS-2 (- RIGHT LEFT) WINDOW PLINE 2)	;Then put down new stuff.
+		  HEIGHT
+		  (+ PC-PPR-L (AS-2 LEFT WINDOW PLINE 1))
+		  Y-POS
+		  TV-ALU-XOR)))
+ NEXTLOOP	)
+ )))
+
+;; MIDDLE LEVEL WINDOW FUNCTIONS
+;; And here are the middle level functions, which know how to tie the low level functions 
+;;    together in useful ways.
+
+;--> ACTIVE window, MINIMAL redisplay
+;This is when the only new thing may be positions of "other" blinkers.
+(DEFUN ED-WINDOW-BLINKER-UPDATE (WINDOW &AUX (BUFFER (ED-WINDOW-BUFFER WINDOW)))
+    (ED-WINDOW-4 WINDOW NIL NIL)
+    (ED-WINDOW-5 (ED-BUFFER-POINT BUFFER)
+		 (ED-BUFFER-MARK BUFFER)
+		 WINDOW
+		 (ED-BUFFER-MARK-P BUFFER)))
+
+;--> ACTIVE window, regular redisplay
+;This is the standard redisplay, which tries to use the existing TOP-LINE.
+;This happens to the active window automatically.
+(DEFUN ED-WINDOW-REDISPLAY (BP WINDOW &AUX LINE-NUM X Y (BUFFER (ED-WINDOW-BUFFER WINDOW)))
+    (SETQ LINE-NUM (ED-WINDOW-TOP-LINE-DISPLAYED WINDOW))
+    (MULTIPLE-VALUE (X Y)
+		    (ED-WINDOW-1 BP WINDOW))
+    (COND ((NULL X)					; If (NULL X) the Y is # of rasters.
+	   (COND ((ED-EOB-P BP)
+		  (SETQ Y (ED-WINDOW-END-RASTER WINDOW))))
+	   (MULTIPLE-VALUE (LINE-NUM X Y)
+			   (ED-WINDOW-2 BP Y WINDOW))))
+    (ED-WINDOW-3 LINE-NUM WINDOW)
+    (ED-WINDOW-4 WINDOW X Y)
+    (ED-WINDOW-5 (ED-BUFFER-POINT BUFFER)
+		 (ED-BUFFER-MARK BUFFER)
+		 WINDOW
+		 (ED-BUFFER-MARK-P BUFFER)))
+
+; --> ACTIVE window, try to recompute
+;This is the function for intentionally computing a new TOP-LINE for an active window.
+;It may not end up clearing the whole screen though.
+;This is not automatic, it must be asked for by the user.
+(DEFUN ED-WINDOW-RECENTER (BP WINDOW RASTER &AUX LINE-NUM X Y
+			      (BUFFER (ED-WINDOW-BUFFER WINDOW)))
+    (MULTIPLE-VALUE (LINE-NUM X Y)
+		    (ED-WINDOW-2 BP RASTER WINDOW))
+    (ED-WINDOW-3 LINE-NUM WINDOW)
+    (ED-WINDOW-4 WINDOW X Y)
+    (ED-WINDOW-5 (ED-BUFFER-POINT BUFFER)
+		 (ED-BUFFER-MARK BUFFER)
+		 WINDOW
+		 (ED-BUFFER-MARK-P BUFFER)))
+
+; --> INACTIVE window
+;This is the function for redisplaying an inactive window.  It never computes a new TOP-LINE.
+;If the point blinker goes off the screen it should be blanked.
+(DEFUN ED-WINDOW-REDISPLAY-INACTIVE (BP WINDOW &AUX VISIBILITY X Y
+					(BUFFER (ED-WINDOW-BUFFER WINDOW)))
+    (MULTIPLE-VALUE (VISIBILITY X Y)
+		    (ED-WINDOW-1-A BP WINDOW))
+    (TV-SET-BLINKER-VISIBILITY (ED-WINDOW-POINT-BLINKER WINDOW) VISIBILITY)
+    (ED-WINDOW-3 (ED-WINDOW-TOP-LINE-DISPLAYED WINDOW) WINDOW)
+    (ED-WINDOW-4 WINDOW X Y)
+    (ED-WINDOW-5 (ED-BUFFER-POINT BUFFER)
+		 (ED-BUFFER-MARK BUFFER)
+		 WINDOW
+		 (ED-BUFFER-MARK-P BUFFER)))
+
+;; HIGH LEVEL WINDOW FUNCTIONS
+
+;; First, the high level functions which know about "where the window are."
+;;   this includes the three entry points, and two auxiliary functions.
+
+;This is the function usually called after every command.
+(DEFUN ED-WINDOW-MUNDANE-REDISPLAY (&AUX W)
+    (DO L ED-WINDOWS-DISPLAYED (CDR L) (NULL L)
+      (SETQ W (CAR L))
+      (COND ((EQ W ED-WINDOW) (ED-WINDOW-REDISPLAY (ED-BUFFER-POINT (ED-WINDOW-BUFFER W)) W))
+	    ((ED-WINDOW-BLIND (CAR L))) ;IF BLIND, DO NOTHING.
+	    (T (ED-WINDOW-REDISPLAY-INACTIVE (ED-WINDOW-SAVED-BP W) W)))))
+
+;This is called when a command has not changed the buffer or the point,
+;   but wants to update any "other" blinkers.
+(DEFUN ED-WINDOW-MINIMAL-REDISPLAY (&AUX W)
+    (DO L ED-WINDOWS-DISPLAYED (CDR L) (NULL L)
+      (SETQ W (CAR L))
+      (OR (ED-WINDOW-BLIND W)
+	  (ED-WINDOW-BLINKER-UPDATE W))))
+
+;This is the command to reposition the current active window.
+;NOT USED BY ANYONE YET.
+(DEFUN ED-COM-REPOSITION-WINDOW (CHR)
+    (SETQ ED-REDISPLAY-LOSES T) ;PARANOIA
+    (ED-WINDOW-RECENTER (ED-BUFFER-POINT (ED-WINDOW-BUFFER ED-WINDOW))
+			ED-WINDOW
+			(ED-WINDOW-NUMERIC-ARG-RASTER
+			 (ED-BUFFER-POINT (ED-WINDOW-BUFFER ED-WINDOW))
+			 ED-WINDOW))
+    (SETQ ED-MARK-STAYS T)
+    ED-DIS-NONE)
+
+(DEFUN ED-COM-COMPLETE-REDISPLAY (CHR)
+    (ED-COMPLETE-REDISPLAY
+     (ED-WINDOW-NUMERIC-ARG-RASTER (ED-BUFFER-POINT (ED-WINDOW-BUFFER ED-WINDOW))
+				   ED-WINDOW))
+    (SETQ ED-MARK-STAYS T)
+    ED-DIS-NONE)
+
+; This function performs a complete redisplay of everything on the screen.
+;   With an arg of NIL it will not recenter anything; with a numeric arg, it
+;   will try to recenter ED-WINDOW to that raster (this is the ^L command).
+
+(DEFUN ED-COMPLETE-REDISPLAY (RASTER &AUX W)
+    (AND ED-DEBUG-P
+	 (TV-CLEAR-PC-PPR ED-DEBUG-PC-PPR))
+    (TV-CLEAR-PC-PPR ED-STATUS-PC-PPR)
+    (TV-CLEAR-PC-PPR ED-ECHO-PC-PPR)
+    (AND ED-PARANOIA-FLAG (TV-CLEAR-SCREEN))
+    (ED-RESET-BLINKER-VISIBILITY) ;Yes, even though ED-REDISPLAY-LOSES is set, this should
+				  ;  get called now, so that windows which have just been
+				  ;  taken off the "DISPLAYED" list get deactivated BEFORE
+				  ;  there is any redisplay of overlapping PCs PPR!
+    (SETQ ED-REDISPLAY-LOSES T)	  ;For good measure, and to get the mode line updated.
+
+    (DO L ED-WINDOWS-DISPLAYED (CDR L) (NULL L)
+      (SETQ W (CAR L))
+      (ED-WINDOW-FAKE-OUT W)
+      (ED-OUTLINE-WINDOW W)
+      (COND ((EQ W ED-WINDOW)
+	     (COND ((NULL RASTER)
+		    (ED-WINDOW-REDISPLAY (ED-BUFFER-POINT (ED-WINDOW-BUFFER W))
+					 W))
+		   (T
+		    (ED-WINDOW-RECENTER (ED-BUFFER-POINT (ED-WINDOW-BUFFER W))
+					W
+					RASTER))))
+	    ((ED-WINDOW-BLIND W) (TV-CLEAR-PC-PPR (ED-WINDOW-PC-PPR W))) ;IF BLIND, CLEAR IT.
+	    (T (ED-WINDOW-REDISPLAY-INACTIVE (ED-WINDOW-SAVED-BP W) W))))
+    T)
+
+; Auxiliary function for ED-COM-COMPLETE-REDISPLAY and ED-COM-REPOSITION-WINDOW.
+; This takes a window and a numerical arg and produces the raster position
+;   in the window associated with that arg.  More than one ED-COM- may want to use
+;   this.
+;(DEFUN ED-WINDOW-NUMERIC-ARG-RASTER (BP WINDOW N &AUX PC-PPR)
+;    (SETQ PC-PPR (ED-WINDOW-PC-PPR WINDOW))
+;    (COND ((OR (> N 4) (< N 0))
+;	   (- (- (PC-PPR-BOTTOM-MARGIN PC-PPR)
+;		 (PC-PPR-TOP-MARGIN PC-PPR))
+;	      (PC-PPR-LINE-HEIGHT PC-PPR)))
+;	  ((> N 1)
+;	   (* 2 (PC-PPR-LINE-HEIGHT PC-PPR)))
+;	  ((ED-EOB-P BP)
+;	   (ED-WINDOW-END-RASTER WINDOW))
+;	  (T (ED-WINDOW-CENTER-RASTER WINDOW))))
+
+(DEFUN ED-WINDOW-NUMERIC-ARG-RASTER (BP WINDOW &AUX PC-PPR LH TEM)
+    (SETQ PC-PPR (ED-WINDOW-PC-PPR WINDOW)
+	  LH (PC-PPR-LINE-HEIGHT PC-PPR))
+    (COND 
+          ((NULL ED-NUMERIC-ARG-P)
+           (COND ((ED-EOB-P BP)
+                  (ED-WINDOW-END-RASTER WINDOW))
+                 (T (ED-WINDOW-CENTER-RASTER WINDOW))))
+          ((> (ABS ED-NUMERIC-ARG) (ED-WINDOW-FILL-POINTER WINDOW))
+	   0)
+	  ((>= ED-NUMERIC-ARG 0)
+	   (* LH ED-NUMERIC-ARG))
+	  (T (* LH (+ (ED-WINDOW-FILL-POINTER WINDOW) ED-NUMERIC-ARG)))))
+
+; Auxiliary function for ED-COM-COMPLETE-REDISPLAY.  If no one else ever uses it,
+;   put it in line.
+; This fakes out the intelligent rediplay mechanism so that the next time this
+;   window is redisplayed, all lines will be updated.
+(DEFUN ED-WINDOW-FAKE-OUT (WINDOW &AUX LIM)
+    (SETQ LIM (ED-WINDOW-FILL-POINTER WINDOW))
+    (DO I 0 (1+ I) (= I LIM)
+      (AS-2 T WINDOW I 0)
+      (AS-2 NIL WINDOW I 1)))
+
+;This is the function which sets the blinker visibility to be consistent with 
+;   the window database.  It is called on ED-REDISPLAY-LOSES.
+(DEFUN ED-RESET-BLINKER-VISIBILITY ()
+    (TV-SET-BLINKER-VISIBILITY MOUSE-BLINKER ED-MOUSE-VISIBILITY)
+    (DO L ED-WINDOWS (CDR L) (NULL L)
+      (COND ((MEMQ (CAR L) ED-WINDOWS-DISPLAYED)
+	     (TV-ACTIVATE-PC-PPR (ED-WINDOW-PC-PPR (CAR L)))
+	     (TV-SET-BLINKER-VISIBILITY
+	      (ED-WINDOW-POINT-BLINKER (CAR L))
+	      (COND ((EQ (CAR L) ED-WINDOW) 'BLINK)
+		    ((ED-WINDOW-BLIND (CAR L)) NIL)
+		    (T (ED-WINDOW-1-A (ED-BUFFER-POINT (ED-WINDOW-BUFFER (CAR L)))
+				      (CAR L))))))
+	    (T (TV-DEACTIVATE-PC-PPR (ED-WINDOW-PC-PPR (CAR L)))))))
+
+; This updates the mode line.  It is called by ED-COMMAND-LOOP if ED-REDISPLAY-LOSES.
+(DEFUN ED-UPDATE-MODE-LINE ( &AUX TEM)
+    (TV-SET-CURSORPOS ED-STATUS-PC-PPR 0 0)
+    (TV-CLEAR-EOL ED-STATUS-PC-PPR)
+    (DO L ED-MODE-LINE-LIST (CDR L) (NULL L)
+      (COND ((SYMBOLP (CAR L))
+	     (SETQ TEM (SYMEVAL (CAR L)))
+	     (COND ((NULL TEM))
+		   ((STRINGP TEM) (TV-STRING-OUT ED-STATUS-PC-PPR TEM))
+		   ((SUBRP TEM) (FUNCALL TEM))			;*** NEW FUNCTIONP??
+		   (T (ERROR "is a bad value for symbol on mode list" TEM))))
+	    ((STRING (CAR L))
+	     (TV-STRING-OUT ED-STATUS-PC-PPR (CAR L)))
+	    (T (ERROR "is not a valid member of ED-MODE-LINE-LIST" (CAR L))))))
+
+(DEFUN ED-DRAW-BOX (X1 Y1 X2 Y2 &OPTIONAL ALU)
+    (OR ALU (SETQ ALU TV-ALU-XOR))
+    (AND (< X2 X1)
+	 (SETQ X2 (PROG1 X1 (SETQ X1 X2))))
+    (AND (< Y2 Y1)
+	 (SETQ Y2 (PROG1 Y1 (SETQ Y1 Y2))))
+    (TV-ERASE (- X2 X1) 1 X1 Y1 ALU)
+    (TV-ERASE (- X2 X1) 1 X1 Y2 ALU)
+    (TV-ERASE 1 (MAX 0 (1- (- Y2 Y1))) X1 (1+ Y1) ALU)
+    (TV-ERASE 1 (MAX 0 (1- (- Y2 Y1))) (1- X2) (1+ Y1) ALU))
+
+(DEFUN ED-OUTLINE-WINDOW (WINDOW &OPTIONAL ALU &AUX PC-PPR TOP B L R)
+    (OR ALU (SETQ ALU TV-ALU-IOR))
+    (SETQ PC-PPR (ED-WINDOW-PC-PPR WINDOW)
+	  TOP (PC-PPR-TOP PC-PPR)
+	  B (PC-PPR-BOTTOM PC-PPR)
+	  L (PC-PPR-LEFT PC-PPR)
+	  R (PC-PPR-RIGHT PC-PPR))
+    (ED-DRAW-BOX L TOP R B ALU)
+    (ED-DRAW-BOX (1+ L) (1+ TOP) (1- R) (1- B) TV-ALU-ANDCA))

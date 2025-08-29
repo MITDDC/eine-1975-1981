@@ -1,0 +1,1327 @@
+.c -*-TEXT-*-
+.c ***** five stars means that this needs to be fixed.
+
+
+.chapter Introduction
+.section Overview
+
+This thesis describes ZWEI, the text editor of the Lisp machine.  ZWEI
+is a real-time, display-oriented editor; both of these terms are
+explained in the thesis.  Editors of this type have been under
+development at MIT for several years; the latest one written for the
+Artificial Intelligence Laboratory's ITS time-sharing system is called
+EMACS [Stallman] [Ciccarelli], and runs under both ITS and the TOPS-20 system.  It
+has been distributed to many TOPS-20 sites, and has been very popular.
+A version of EMACS for the Honeywell Information System's Multics
+system, called Multics EMACS [Greenberg 1], has also gained a large
+following.  The TVmacs editor, written in SINE [Anderson] for the
+Interdata 7/32 running MagicSix, is also similar to EMACS.
+
+When the Lisp Machine software system began being built, it was clear
+that such an editor would be needed.  We wrote such an editor, called
+EINE (for EINE Is Not EMACS), and are in the process of writing a new
+version called ZWEI (for ZWEI Was EINE Initially).  Most of the
+conversion effort, at this point, is rather mechanical, as the basic
+philosophy of EINE and ZWEI are very close.  This thesis is written in
+anticipation of the completion of the conversion effort, and describes
+ZWEI as it will be when the rest of EINE is converted over.
+
+The thesis has four chapters.  This is the first chapter, and it goes
+on to explain what the Lisp Machine system is.  The second chapter
+describes ZWEI's user interface; that is, it tells what ZWEI looks like
+to the user.  The chapter discusses the reasons why ZWEI looks as it
+does, and points out how the nature of the Lisp Machine affected this
+interface.
+
+The third chapter explains how ZWEI is implemented; that is, the
+strategies used to write the program that implements the
+previously-described user interface.  Some familiarity with the Lisp
+Machine's dialect of Lisp [Weinreb and Moon] is presumed.  This chapter
+also emphasizes the ways in which the Lisp Machine affected various
+engineering tradeoffs in ZWEI's design.
+
+.section What is the Lisp Machine?
+
+In order to understand why ZWEI looks and works the way it does, it is
+important to understand first the environment in which it was created.
+The unique software environment presented by the Lisp Machine, with its
+unusual provisions and requirements, greatly influenced ZWEI's design.
+
+The Lisp Machine is a new computer system, whose primary purpose is to
+provide a high performance and economical implementation of the Lisp
+language.  It was constructed for the use of the researchers at the MIT
+Artificial Intelligence (AI) Laboratory, and since AI research is
+almost solely conducted in the Lisp language or in systems based on
+Lisp, the support of Lisp was of paramount importance.
+
+AI programs tend to utilize computer resources very heavily.  They
+consume large amounts of memory space and processor time.  Before the
+creation of Lisp Machines, all Lisp work at the Lab was done on Digital
+Equipment PDP-10 computers, running the ITS time-sharing system.  There were
+two primary problems with this arrangement.  First of all, the PDP-10 has only
+an eighteen-bit virtual address space; this space was often too small
+to contain the complex Lisp environments needed by the AI programs.
+Secondly, there was great competition between the users for physical
+main memory resources, as most users ran programs that used large
+amounts of virtual memory.  Both of these problems were getting
+steadily worse, and no easy solution within the PDP-10 framework was
+forthcoming.
+
+The solution was the creation of the Lisp Machine.  A Lisp Machine is a
+personal computation system, in that during the course of an
+interactive session, a processor and a memory are devoted to one user.
+This solution was made possible largely due to the new low prices of
+computer hardware.
+
+When a user sits down to work at a Lisp Machine, he has a processor, a
+multi-level memory made of RAM and a disk, and several peripheral
+devices, all of which are devoted to him for the duration of his session.  None of the
+memory is shared, and so just because memory is left unreferenced does
+not mean that other users are likely to cause it to be paged out.  More
+importantly, there is no other demand for processor time, and so for
+any period of time during which the user does not do any computation,
+the processor sits idle.  We will see later how these attributes of the
+Lisp Machine affected the design of ZWEI.
+
+A particularly relevant feature of the Lisp Machine's hardware is the
+terminal through which the user communicates with the machine.  ZWEI is
+highly interactive, and it is only through the means provided by the
+terminal that interaction can take place.  The Lisp Machine's terminal
+is especially interesting in that it is, in many ways, more powerful
+and flexible than the standard video display terminals popular today.
+The features provided by the terminal had a great deal to do with the
+design of ZWEI's user interface, and so the following detailed
+description of the terminal is provided.
+
+The Lisp Machine terminal consists of two input devices, called the
+2keyboard* and the 2mouse*, and one output device called the
+2TV*.  The keyboard is similar to most computer-terminal keyboards:
+it is like an electric typewriter keyboard except that it contains
+various extra symbols such as curly-brackets and backwards-slash.  The
+Lisp Machine keyboard, like the keyboards used on the AI Lab's PDP-10
+TV terminals, differs from most keyboards in that it has an extra shift
+key called META, which can be depressed in conjunction with any key.
+Also, the CONTROL key does not have the usual ASCII meaning; rather, it
+is like META in that it can be meaningfully held down along with any
+other key.  This means that for any key on the keyboard, four possible
+2keystrokes* may be given, depending on the presence or absence of
+the CONTROL key and of the META key.
+
+The mouse [English et al] is a graphical input device; its purpose is to convey
+positional information rather than character information.  The mouse
+is a small plastic device that rests on the table.  The user places his
+hand on the mouse and rolls it around on the table.  A small metal ball
+in the mouse touches the table, and its rolling is monitored and
+transmitted to the processor, which maintains the current position of
+the mouse at all times.  The mouse also has three buttons on it, which
+the user can depress with the fingers of his hand.
+
+The TV looks like a regular television screen on its side.  It is what
+is called a 2raster-scan display* device, which means that the screen
+is divided into a rectangular grid of points called 2pixels*.  Under
+computer control, each pixel can be light or dark.  The TV is used for
+output of both characters and pictures.  The resolution of the Lisp
+Machine's TV is particularly good; there are about a million pixels in
+the screen, which means that the number of characters that can be
+displayed is much greater than that of most computer terminals.
+
+.chapter The User Interface
+
+.section User Interface and the Lisp Machine
+
+What should a text editor for the Lisp Machine look like to the user?
+The answer depends both on the nature of the users of Lisp Machines,
+and on the nature of the Lisp Machine itself.
+
+The users of the Lisp Machine, at least for the time frame under
+consideration, are the researchers at the AI Lab.  They have two
+principal uses for a text editor.  First, they produce large volumes of
+Lisp code, all of which must be entered with an editor, and corrected
+as the debugging process takes place.  Secondly, they write academic
+papers, electronic mail, and other English text, all of which is far
+easier with the help of a good editor.  Furthermore, it could be safely
+predicted that most users would spend a good deal of their working time,
+perhaps more than half of it, working with the editor.
+
+The needs of the user commmunity could be judged well because the
+community already existed, and was using editors on the PDP-10 to
+accomplish these same purposes.  This brings up one of the most
+important considerations of ZWEI's user interface: compatibility.
+Since the users had already been spending much of their time using the
+PDP-10's interactive editors, and since for quite a long period of time
+they would have to use both the PDP-10 editors and the Lisp Machine
+editors, it seemed that it would be a poor idea to force the users to
+learn a second, incompatible command set.  Happily, we had very few
+complaints with the major PDP-10 editor, ITS EMACS, and very little desire
+to change its user interface.  Therefore, ZWEI strongly resembles EMACS
+to the user, and anyone who has acquired skill in the operation of
+EMACS would feel equally at home in ZWEI.
+
+In the remainder of this chapter, we will discuss first the basic
+command structure of ZWEI, which is the same as that of EMACS.  We will
+discuss the motivation that led to this design for EMACS, as that
+motivation holds equally well for ZWEI.  Secondly, we will discuss the
+special issues of the Lisp Machine environment and ZWEI's interaction
+with it.  Finally, we will discuss the innovations in ZWEI's user
+interface that resulted from the Lisp Machine's enhanced terminal.
+
+.section The Basic Command Structure
+
+ZWEI is a 2display-oriented*, 2real-time* editor.  The meanings
+of these two terms are very important, as they describe the essence
+of the way the user interacts with the editor.
+
+Display-oriented means the text that the user is editing at any
+moment is displayed on the screen in front of him.  This crucial
+capability can only be provided on display terminals that have random
+access to their screens; printing terminals and very simple display
+terminals cannot be display-oriented.  Most people find text editors
+hard to use, because they have trouble remembering exactly what the
+text looks like, and they can't easily see what effects their commands will
+have.  Display-oriented editors dispel this confusion, because the text
+is always right in front of the user, and at a glance he can tell just
+what is going on.
+
+In more detail, as the user edits, he does so with respect to a
+2position* in the text being edited, called the 2point*.  The text
+immediately preceding and following this point is kept on the screen,
+and the position of the point within the text displayed is shown by
+means of the position of the terminal's 2cursor*, usually a flashing
+rectangle or underscore.
+
+That the editor is real-time means that each command takes effect
+immediately as the user gives it, and the result of the command is
+reflected by an updating of the state displayed on the screen: the text
+may be changed and the cursor may be moved.  (This updating is called
+2redisplay*.) The effects of ZWEI's display-orientation and
+real-timeness combine to give the important feature that at all times,
+the user can conveniently see just what is going on with his editing,
+and quickly make decisions about what to do next, based on the
+information on the screen.  This feedback is extremely useful in the
+highly interactive process of editing.
+
+Simple editor commands are given by the user at a very high rate, often
+many per second.  In order to allow this high rate of command-giving,
+the simple commands in ZWEI only require one keystroke.  The most
+fundamental command is called 2self-insertion*.  Keys which represent
+ASCII characters such as letters, numbers, and punctuation marks, when
+depressed, cause the corresponding character to be inserted at the
+location of the point, and cause the point to be moved forward by one
+character.  For example, typing a "Q" inserts a character "Q", and
+moves point forward one.  So if the user simply types some text, that text
+is inserted into the buffer.
+
+The simplest control commands are given by using 2control
+characters*, that is, keys typed while the CONTROL key is held down.
+The assignment of these keys was chosen in such a way as to make them
+easy to remember.  Control-F (The "F" key typed with CONTROL held down)
+moves the point forward by one character, Control-B moves the cursor
+backward one character, Control-D deletes a character at the position
+of the cursor, Control-N moves to the next line, and Control-P moves to
+the previous line.  Numeric arguments may be given to these commands by
+typing number keys with CONTROL held down; with an argument, the
+command acts on that many characters or lines instead of just one.  For example,
+Control-3 Control-D would delete three characters.
+
+Other simple commands are given to delete whole lines, to pick up
+pieces of text and move them from one place to another, to move to the
+beginnings and the ends of lines, and so on.  A user first learning how
+to use the editor can get a lot done with just these simple commands,
+and then he can learn more commands as needed.  Since these commands
+require very few keystrokes, they can be given very rapidly.
+
+Some other commands are given much less frequently.  Since there is a
+limited number of possible different single-keystroke commands, some of
+these less frequently used commands are put on two-character sequences.
+The character Control-X is a prefix, and the character typed after it
+determines what action is taken.  The most fundamental of this group
+are commands used for reading in a file from the file system, and for
+writing the text edited out to a file.  Usually, an editing session
+starts with the user's reading in of a file to be edited; sometimes he
+is starting on a new project and does not read in a file, but just
+starts with an empty buffer.  Then, he gives editing commands to
+insert, delete, and otherwise change the text in the buffer.  Finally,
+he writes the buffer out to a file.
+
+.section Advanced Commands
+
+The set of commands described so far is sufficient to do all editing,
+yet is easy to learn.  Most users indeed start out by learning just
+those commands, and editing for a while with them.  Even with just this
+command set, a real-time display-oriented editor is much more usable
+than the usual printing-terminal text editor found on most interactive
+systems.  However, once the user gets proficient with these basic
+commands, he can profit greatly by learning the rest of the large
+set of commands provided.
+
+First of all, when someone is trying to perform a task of editing, the
+task usually would not be described in terms of characters of text.
+More typically, if the text were in English, the task would be
+expressed in terms of words, sentences, or paragraphs; for example, one
+might want to delete that word, replace these three words with those
+two words, or interchange the order of those two sentences.  Similarly,
+when writing Lisp code, it is usually natural to think in terms of
+atoms, lists, and top-level list structure.  In order to let the user
+express what he wants to do in these terms, ZWEI provides commands to
+manipulate the English and Lisp constructs mentioned above.  Here is where
+ZWEI takes advantage of the CONTROL and META keys of the Lisp machine keyboard:
+the commands to do things to words and to Lisp lists are created by
+using the same commands as those that operate on characters, but using the META
+key to mean that words are being referred to, or by using both CONTROL and
+META to mean that Lisp lists are being referred to.  Thus, the
+command Meta-F moves forward over a word, Meta-B moves backward over a
+word, and so on.  Similarly, Control-Meta-F moves forward over a Lisp
+list, and so on.  When editing text or Lisp, these commands are quite
+frequently used, and are almost always more useful than the character commands
+themselves.
+
+Secondly, more advanced operations on text are provided.  There are
+commands to search within the text for some substring, and move the
+point to its location.  There is a command to replace all occurences of
+a string with another string; another version of this command shows
+each substitution to the user and asks for his confirmation before
+performing the replacement.  Another command can fill the text,
+moving words between lines to make the length of each line
+approximately the same; this command can also justify (right-adjust) the text.
+Several commands control just what part of the text gets displayed on
+the screen.  There is a command which assumes that the text being
+edited is a piece of Lisp code, and inserts the right amount of
+indentation for the next line of code; another command re-formats a
+whole Lisp function definition--this is what Lisp users call
+pretty-printing.  A set of commands can uppercase or lowercase a
+region of text or a set of words, or to capitalize words.  Another set
+of commands can manipulate Lisp comments; these commands know about the usual
+programmer's rules to try to make the comments line up well so that
+they look neat.  There are many more such commands--too many to list here.
+
+It may seem surprising that users are not overwhelmed by this command
+set--it looks like there are so many commands that nobody could ever
+learn them all.  In fact, though few people are familiar with 2all*
+of these commands, most users do know most of the commands.  Each user
+starts by learning about fifteen basic commands, and simply learns new
+ones as he gets more and more familiar with the old ones.  New commands
+seem to be easy to learn.
+
+One feature that makes it easy to learn all of these commands, and to
+remember just what they do, is called 2self-documentation*.  There
+are several commands that tell the user what other commands do.  The
+most useful is the Control-? command.  It is used by typing Control-?
+followed by some keystroke; the name of the command and a description
+of what it does is printed out on the screen.  Another command takes a
+string, and prints out the names of all commands whose name contains
+that string as a substring.  Along with each name it prints a one-line
+English description, and which keystroke (if any) will invoke that
+command.
+
+Some commands are used quite rarely, perhaps an average of once a day.
+It would be a bad idea to have such commands as one-keystroke or
+two-keystroke commands, since it would be much too hard to remember
+what keystroke to use.  Instead, the user invokes the command by typing
+Meta-X followed by the name of the command.  These so-called
+2extended* commands are made easier to type by the use of
+2command-completion*: if the user typed enough of the name so as to
+completely specify which of the extended commands he means, and then
+types the ALTMODE character on the keyboard, the name of the command is
+completed by the computer.
+
+Whenever some text is being edited, some set of 2modes* are in
+effect.  There is always one 2major mode*, which tells the editor
+what kind of document is being edited.  Text mode is used for English
+text, Lisp mode for Lisp programs, Macsyma mode for Macsyma programs,
+Teco mode for Teco programs, etc.  About a dozen major modes are available,
+most for different programming languages.  The major mode usually controls
+how comments are recognized, and change various indentation parameters
+and sometimes a few commands.  The Tab key normally inserts an ASCII
+Tab character, but in Lisp mode it indents the right amount for Lisp,
+and so on.
+
+A large set of minor modes, variables, and parameters can be set up to
+change the way the editor works.  As users gain sophistication with the
+more advanced features, they discover the settings of these parameters
+that most please them, and put these into a command file which is read
+in and acted upon when they use the editor.  This way, each user can
+tailor his environment to suit himself.  A great deal of flexibility is
+provided; a user can change which keys are connected to which commands,
+and best of all he can write his own commands and install them in lieu
+of the provided commands.  A few users make extremely radical changes,
+to the point where most every key has a new meaning.
+
+The text being edited by the user at any time is considered to be
+sitting in a 2buffer*, a conceptual receptacle of text.  In fact, one
+often wants to edit several things at once, switching back and forth
+between different parts of work.  To facilitate this, there can be many
+buffers, each of which has a name.  At any time, one is being edited;
+it is called the 2current* buffer.  Commands are provided to change
+which buffer is current, and to create, destroy, list, and rename
+buffers.
+
+Another powerful feature is 2word abbreviation*.  If the user finds
+himself typing some long word many times, he can define a short
+abbreviation which will expand into the long word upon being typed in.
+For example, the word "machinations" could be abbreviated by the string
+"machs".  If the user typed in "machs" followed by a non-alphanumeric
+character, it will expand (right before his eyes) into "machinations".
+
+Another, similar feature is called 2auto fill* mode, in which text
+filling is performed automatically.  If the user tries to type a word
+which would go past the end of the screen, a newline character is automatically
+inserted before the word in order to force the word onto the next line.
+This way, text filling happens as the text is typed in, and so the user can
+see it happen, and adjust it if it is not just to his liking.
+
+Yet another work-saver, called 2keyboard macros* is provided.  If
+there is some list of commands that the user wants to type in many times
+successively, he can request that the machine do the repetition for
+him.  For example, he might want to put the word "the" at the front of
+each of the next twenty lines.  The simple way to do this would be to
+go to the first line, and type "the", followed by a Control-N and a
+Control-A to get to the next line.  These five characters ("the" and the
+two control characters) would then have to be typed twenty times in a
+row.  By using keyboard macros, the user could define that five letter
+sequence to be a macro, and then ask for it to be typed twenty times.
+
+.section The Lisp Machine Environment
+
+Since ZWEI is written in Lisp and lives in the Lisp environment of the Lisp
+machine, it is in a very good position to interface closely with other elements
+of that environment.  It does this in several ways.
+
+First of all, several commands are provided that treat the text in the buffer
+as Lisp code, and relate it to the outside Lisp environment.  These
+commands can read and evaluate parts of the buffer or the
+whole buffer, so that they are placed into the Lisp environment.  For
+each of these, another command is provided to call in the Lisp
+compiler, and compile the code into the Lisp environment.  Another
+command is provided that looks at the name of a function in the buffer,
+and looks in the Lisp environment to find the list of the names of the
+arguments of that function, and types them out on the screen.  This is
+very helpful when one is typing in argument forms and forgets the
+meanings or order of the arguments.
+
+Secondly, ZWEI can be called as a subroutine by any program running
+in the Lisp machine.  If some subsystem would like to get some text
+input from the user, it can simply call a subroutine which will let the
+user edit his text using the full capabilities of ZWEI; this way, if he
+makes a mistake when typing in whatever it is he is typing, he has
+all of the ZWEI commands at his fingertips to correct it.
+
+.c ***** anything more to say?  files and file property lists?
+
+.section The Terminal
+
+As mentioned above, ZWEI has several advanced features made possible
+only because of its enhanced terminal.  The various hardware features
+of the terminal have already been described, and the first use of them
+has already been mentioned: the CONTROL and META keys are heavily used to create
+a large number of single-keystroke commands.
+
+The graphical capabilities of the TV output device also allow certain
+features that would be impossible to provide on a standard video
+terminal.  First of all, text can be displayed in many different typefaces or
+2fonts*; italic and bold characters can be shown in
+many different sizes and styles.  These can all be mixed in a buffer,
+and commands are provided to change the font of regions of text or of
+words, and to change the font used for text being typed in.
+
+Secondly, the screen can be divided into many 2windows*.  A window
+is a rectangular portion of the TV screen, and each one acts as if it were
+a little TV screen itself.  Each window
+can display text from a different buffer, or from different parts of
+the same buffer, or even the same part of the same buffer.  This is
+mostly useful for editing one thing while looking at another; for
+example, one might edit the documentation of a program in one window
+while looking at the source of the program in another window.  Each window
+is outlined with black lines.
+
+Thirdly, when Lisp code is being edited, and the point is to the right
+of a close-parenthesis, the matching open parenthesis is made to blink
+on and off.  This shows the user how the parentheses balance, and is
+very helpful for keeping track of the nested parentheses so common in
+Lisp code.
+
+A fourth use of graphics is to display a marked region of text.  In
+order to designate a region of text to ZWEI, the usual thing to do is
+to move to one end of the region, and give a command that says
+"remember this point; it is one end of the region I want to do
+something to", and then to move to the other end of the region and give
+a command.  In order to show the user where the marked region is, ZWEI
+can either underline the text in the region, or display that text in
+reverse-video (white-on-black characters).
+
+The mouse (the rolling graphical-input device described earlier)
+can be used as an input device to give commands to ZWEI.  A
+small arrow is drawn on the screen, and a software process tracks the position of
+the mouse and moves the arrow to reflect the motion of the mouse
+on the table.  In this way, the user can indicate places by moving
+the mouse until the arrow points where he wants it to.
+The mouse can be used to point to characters being
+displayed on the screen; some people find this graphical identification
+of locations in the buffer to be more natural than sequences of commands
+to move the point around.  The buttons on top of the mouse can be used
+to give commands to ZWEI.  The usual usage of the mouse is to
+move the point to where the mouse is, by clicking the left mouse
+button.  The mouse can also be used to mark a section of text, by
+moving to one end of the region, depressing the left button, moving to
+the other end of the region, and releasing the button.  The middle
+button is used for marking words or lists at a time, and the right
+button is reserved for the system.
+
+The use of the mouse is still considered experimental.  We know of
+several editors which depend highly on the use of a mouse for input,
+but we are not convinced that it is better than a keyboard; after more
+people start using ZWEI, it will be interesting to see how many of them
+make heavy use of the mouse and how many hardly use it at all.
+
+.chapter The Implementation
+
+.section Implementation and the Lisp Machine
+
+The Lisp Machine's unusual nature played a pervasive role in the design
+of ZWEI.  The first question, in what language ZWEI should be written,
+was instantly answered: Lisp.  Since everything in the Lisp Machine
+is written in the Lisp language, the choice was clear.  The only question was
+whether some intermediate language should be written in Lisp, and ZWEI
+written in the intermediate language.  Intermediate
+text-editor-oriented languages have been used in two cases that we know
+of.  The first is the EMACS editor for the PDP-10, which is written in
+TECO, and the second is the TVmacs editor for the Interdata 7/32, which
+is written in SINE.  However, it seemed that Lisp Machine Lisp was a
+sufficiently powerful and comfortable environment for writing a text
+editor that no intermediate language would be needed.  Indeed, Multics
+EMACS [Greenberg 1] is another real-time display-oriented editor written
+in Lisp, and the system on which is runs, Multics, is not primarily Lisp-oriented.
+
+Therefore, ZWEI is a large Lisp program.  The fact that the Lisp
+Machine's dialect of Lisp handles strings very well helped immeasurably
+in the writing of ZWEI; it would have been very hard to write in PDP-10
+Maclisp, which does not have strings at all.  The low overhead of
+arrays in the Lisp Machine was also helpful.
+
+A common problem with real-time editors is that they
+consume too much of computer time, as the job of maintaining the characters
+on the screen, i.e. redisplay, requires a great deal of calculation.
+The Lisp Machine's ample spare capacity had important effects on
+the design of the redisplay algorithm; this is discussed later in the
+section on redisplay.
+
+Another common problem with real-time editors is that they require very
+good response time in order to be pleasant to use.  Since the Lisp
+Machine is not shared, there is no other demand for its time, and its
+response characteristics are excellent; this helped ZWEI a lot.
+
+.section Representation of Text
+
+In this section we will discuss and describe the data structures used
+to represent text inside ZWEI.  These objects are 2lines*, which hold
+the characters of a line of text, 2bps* (buffer pointers), which mark
+positions in the text, and 2intervals*, which are pieces of text.
+
+Text in ZWEI is represented as a doubly-linked list of 2lines*.
+A line is described by the following structure definition:
+
+.lisp
+;;; Structure definition of a ZWEI line.
+(defstruct (line array-leader)
+     line-length			;Number of characters.
+     line-next				;Next line.
+     line-previous			;Previous line.
+     line-bp-list			;List of permanent BPs.
+     line-tick				;Last time modified.
+     )
+.end_lisp
+
+This requires some explanation.  First of all, arrays in Lisp Machine
+Lisp may optionally have an extra vector of Lisp objects attached to
+them.  This vector is called the 2array leader* of the array, and can
+be treated as an array itself.  Character strings in the Lisp Machine
+are represented by a type of array called 3art-string* arrays; each
+line is such a string, with an array leader of five elements.
+
+The contents of the array are the characters of the line.  Newline
+characters are not stored, but are implicitly assumed to be between
+every pair of lines.  The characters are stored in the Lisp Machine
+character set [see Weinreb and Moon], which is essentially ASCII.
+
+The 3defstruct* macro call above assigns names to each of the five
+array leader elements, so that each can be referred to by a name that
+reflects its meaning, rather than an arbitrary number.  The
+3line-length* of a line is a fixnum, the number of characters in a
+line.  This tells how many of the characters in the body of the array
+are currently in use and part of the text; the rest of the array is not
+used.  If characters are inserted into the middle of this line, the
+3line-length* will be increased and some of the rest of the array
+will be used.  If the space needed became more than the size of the array,
+the array would be grown, using the 3adjust-array-size* function.
+
+The 3line-next* and 3line-previous* hold the next and previous line
+in the doubly-linked list of lines that form the text.  The 3line-previous*
+of the first line and the 3line-next* of the last line are both 3nil*.
+The 3line-bp-list* and the 3line-tick* are explained later.
+
+The next important data structure to present is the 2buffer-pointer*, or
+2bp*.  Bps are used to point to a position within a piece of text.  The
+Lisp definition of a bp is:
+
+.lisp
+(defstruct (bp list)
+     bp-line				;Line at which we point.
+     bp-index				;Character position in line.
+     bp-status				;:NORMAL, :MOVES, :TEMP
+     )
+.end_lisp
+
+The bp has three components.  The 3bp-line* of a bp is the line
+containing the place at which the bp points.  The 3bp-index* is a
+fixnum, the character position within that line that the bp refers to.
+The 3bp-status* is described later.  A bp is usually thought of as
+pointing 2between* two characters, rather than at a character; a bp
+whose 3bp-index* is zero points to before the first character of the
+line, and a bp whose 3bp-index* equals the 3line-length* of the
+line points to after the last character on the line.
+
+The most important bp at any time is the one which represents the
+current position in the buffer, called the 2point*.  Most of the
+commands in ZWEI take action based on the position of the point, and
+many of them change it.  Another important bp is called the 2mark*,
+and is used for designating one end of a region of text.  Several
+commands are defined to perform some operation on an arbitrary region
+of text; a typical operation is uppercasing, that is, replacing all
+characters with their uppercase version.  To uppercase a region of
+text, the user moves the point to one end of the region and gives a
+command which moves the mark to the position of the point.  Then he
+moves the point to the other end of the region.  Now the point and the
+mark delimit the region to be acted upon, and he can give the command.
+
+The scheme of using the mark as described above is used in EMACS, and
+has a minor problem: when the user is not currently concerned with the
+mark, and has not given any command related to the mark recently, the
+mark will probably be at some random place in the buffer, i.e. wherever
+it was last used.  If the user accidentally types one of the commands
+that performs some operation on the region between point and mark, a
+huge section of the text being edited might be damaged, and it might
+require a lot of work to fix it.  Another manifestation of this problem
+is that in ZWEI, we wanted to mark the region between point and mark by
+underlining the marked text, but this would be irrelevant and distracting when the mark
+was not being used.  Therefore, ZWEI maintains a flag which says either
+that the region does exist, or that it does not.  When it does exist,
+the region is underlined and all of the region commands work correctly;
+when it does not exist, nothing is underlined, and any command that is
+asked to act on the region will report an error.  The flag is turned on by
+any command that sets the position of the mark, and off by any command that does
+something other than move the point.
+
+ZWEI provides a large number of functions for the manipulation of text,
+and the arguments used to designate positions in text are buffer
+pointers.  There are functions to delete the region between two buffer
+pointers, to insert text at a buffer pointer, and to perform other
+operations on positions or regions of text.  There are also a wide
+variety of 2positioning* commands, which take a bp pointing to some
+text and return a new bp that points some number of characters ahead of the
+given pointer, or words or lines or Lisp lists or sentences ahead
+of the given pointer.  The ZWEI user commands are all built out of these
+functions.
+
+As text is inserted and deleted at various points, it is desirable for
+buffer pointers to continue to point to the same place they were
+pointing before the insertion or deletion.  However, the above data
+structure does not achieve this goal automatically.  Here is an example
+that illustrates the problem:  Suppose we have the line shown in figure 1.
+Two buffer pointers are pointing at it, one pointing to just
+before the word "hello" and another pointing to just before the word
+"there".  Now, suppose we delete three characters at the first buffer
+pointer.  It would be nice if nothing happened to the second pointer;
+it should continue to point just before the word "there".
+Unfortunately, bps store the position in the line as a fixnum, and the
+first character of the word "there" is no longer at position 6 in the
+line.
+
+To remedy this problem, every time an insertion or deletion takes
+place, all buffer pointers are adjusted, or 2relocated*, so that they
+continue to point at the same place relative to the text.  This means
+that ZWEI must be able to find all of the buffer pointers, so that it
+can change them whenever there is an insertion or deletion.  This is
+accomplished by keeping a list for each line of all the bps that point
+to text on that line.  This list is the 3line-bp-list* mentioned, but
+not explained, above.  It would be possible to just keep a list of all
+bps in the world, rather than keeping a separate list for each line;
+however, this would mean that any time an insertion or a deletion took
+place, ZWEI would have to loop over all buffer pointers to check
+whether to relocate them, an unacceptably slow operation.
+
+One problem encountered early in the design of relocating buffer
+pointers was what to do if text were inserted right at the point where
+some bp was pointing.  Should the bp end up before the newly inserted
+text, or after?  Eventually it was decided that both kinds of buffer
+pointers were needed, and the component 3bp-status* was added.  If
+the 3bp-status* of a bp is 3:normal*, then the bp ends up before
+the inserted text; that is, its 3bp-index* is not changed.  If the
+3bp-status* is 3:moves*, then the bp is moved to the end of the
+inserted text.
+
+Another problem was noticed when ZWEI started to perform more
+sophisticated operations: a large number of bps were produced as parts
+of intermediate computation, and never needed to be relocated.  If all
+of these bps were to be put onto the 3line-bp-list* of their lines,
+and were to stay there, the 3line-bp-list*s would grow to be
+extremely long, and insertion and deletion would become slow.  Also,
+ZWEI would gradually use up more and more storage, never returning it.
+To solve this problem, the 2temporary bp* was introduced.  Since most
+of these intermediate bps never needed to get relocated anyway, they
+simply are never put onto the 3line-bp-list* at all; the writer of
+the ZWEI code must be careful with them, since if his code does an
+insertion or deletion the bp becomes invalid.  Tempoaray bps are marked
+by a 3:temp* in their 3bp-status*, and most functions that return
+bps return the temporary kind.
+
+The next ZWEI data structure we will discuss is called an 2interval*,
+and is used to represent a piece of text.  It is a two-component structure
+with the following declaration:
+
+.lisp
+(defstruct (interval array)
+     interval-first-bp			;First position in interval.
+     interval-last-bp			;Last position in interval.
+     )
+.end_lisp
+
+The value of each component is a bp; the two bps delimit the interval.
+The interval consists of all of the characters between the
+3interval-first-bp* and the 3interval-last-bp*.
+The 3interval-first-bp* is a 3:normal* bp, and the
+3interval-last-bp* is a 3:moves* bp; this way, if an empty interval
+is created and some text is inserted into it, the two boundaries will
+move in the right directions.
+
+An illustration of an interval, and the way it represents a piece of text,
+is given in figure 2.  The text represented is:
+
+.lisp
+This is a
+sample of
+text in ZWEI.
+.end_lisp
+
+.section Representation of Windows
+
+A 2window* is a ZWEI object that lets the user look at text inside
+ZWEI.  A window looks like a rectangular box on the screen with
+characters in it; those characters represent the text of some interval.
+
+A window is represented by the following data structure:
+
+.lisp
+(defstruct (window array-leader)
+     window-n-plines			;Number of lines long.
+
+     ;; Associated data structures
+     window-interval			;Interval being displayed.
+     window-tvob
+     window-pc-ppr
+
+     ;; Redisplay
+     window-redisplay-degree		;Degree of redisplay needed.
+     window-redisplay-line		;ditto
+     window-redisplay-index		;ditto
+     window-last-point-pline		;Last pline point was on.
+     window-start-bp			;Where to start redisplaying.
+
+     ;; Point, mark, etc.
+     window-point
+     window-mark
+     window-mark-p
+     window-point-pdl
+     window-point-blinker)
+
+(define-window-macros
+    pline-line
+    pline-from-index
+    pline-to-index
+    pline-tick
+    pline-marking-left
+    pline-marking-width
+    pline-text-width)
+.end_lisp
+
+This declaration is somewhat more complicated than the previous
+declarations, because it has two parts; the first is a 3defstruct*
+that defines the elements of the leader of the array, and the second is
+a special-purpose macro-defining macro that defines the body of the
+array.  First we will describe the elements of the array leader.
+
+A window is thought of as having a certain number of 2physical lines*,
+or 2plines*.  A 2pline* is called that to distinguish it from a line of text.
+Usually, one line of text is displayed on each physical line of a window.
+However, ZWEI does not impose a limit on the length of lines of text, and
+so there can be lines that are so long that they do not fit on one physical
+line of the window.  ZWEI handles this by placing the rest of the line
+(the part that doesn't fit) on the 2next* physical
+line down.  Such extra plines are called 2continuation lines*, and
+any number of them can be used to allow a very long line to be displayed.
+The 3window-n-plines* of a window tells ZWEI how many physical lines
+there are on the window.
+
+The next set of elements in a window's array leader are some other
+associated data structures.  First of these is the interval that this
+window is currently responsible for displaying; this is the
+3window-interval*.  It is the task of this window to display the text
+of that interval on its section of the screen.  The 3window-tvob* is
+a structure that interacts with the Lisp Machine's screen sharing
+system, which allows several programs to use parts of the screen
+without getting in each other's way.  This fascinating body of software
+is still undergoing major revisions, and would require a long paper in
+itself to describe, and so it will not be described further here.
+
+The 3window-pc-ppr* of a window is a kind of data structure provided
+by the Lisp Machine called a 2piece of paper*, abbreviated 2pc ppr*
+in the software.  The purpose of the piece of paper is to provide the
+capabilities of a video display terminal on the Lisp Machine's graphics
+terminal.  The piece of paper knows about the rectangular part of the screen on
+which the window will display its characters, and it maintains a cursor
+position and knows how to output characters.  Almost all of ZWEI's
+actual drawing on the TV is done by operations performed on the piece of paper.
+See Chapter 23 in [Weinreb and Moon].
+
+The next set of elements are used by the redisplay algorithm, and are
+described later.
+
+The rest of the elements are part of the environment of the user when
+he is editing within this window.  First are the point and mark for
+this window, two bps stored in the 3window-point* and
+3window-mark*.  The next element, the 3window-mark-p*, can be
+either 3t* or 3nil*, and tells whether the region being delimited
+by the point and mark currently exists (this was explained above, with
+the description of bps).  The 3window-point-pdl* is a push-down list
+of bps that represent former positions of point.  There is a command to
+push the current position of point onto this pdl, and several
+commands (such as some that move the point over a large interval of
+text) will cause the position to be pushed automatically.  The pdl is
+used to keep track of places that the user has visited recently,
+to make it easy for him to come back to them.  This pdl is not infinitely
+deep; only the last ten positions are remembered, since anything deeper
+than ten levels in the pdl probably reflects a buffer position that was
+reached so long ago that it is not meaningful to the user.  The
+3window-point-blinker* is the blinker (a flashing rectangle on the
+window's pc ppr) that denotes the position of point in the text being
+displayed.
+
+The second part of the declaration of the window's data structure is a
+call to a special-purpose macro-defining macro called
+3define-window-macros*, which was written just for this purpose,
+because 3defstruct* was not powerful enough to achieve the desired
+result.  Lisp's powerful macro facility, which allow this kind of
+user-formulated data structure, is one of the reasons we were glad that
+Lisp was the language in which ZWEI was written.  The body of a window
+array is two-dimensional: there is one row for each physical line in
+the window, and each column of a row is a named element; the body is
+therefore what PL/I calls an "array of structures".  The seven elements
+in the 3define-window-macros* are the names of the seven columns of
+the array.  So each physical line of the window has a 3pline-line*, a
+3pline-from-index*, and so on.  All of the elements of these
+per-pline structures are used for redisplay, which is explained in the
+next section.
+
+.section Redisplay
+
+After the carrying out of each of the user's commands, ZWEI must update
+the text being displayed in the window to reflect the current contents
+of the interval being edited.  This is called 2redisplay*, and it is
+typically the hardest problem in writing a real-time display-oriented editor.
+There are two major goals in the design of a redisplay algorithm.  The first is
+that the fewest number of characters should be output to the terminal to
+change the current set of displayed characters into the correct new set of
+displayed characters.  The two reasons for this goal are that the characters
+usually must be transmitted over a communications line whose bandwidth is
+not too high, and that the less flashing of the screen in front of the user's
+eyes, the easier it is to see what is going on.  The first reason does not apply
+to ZWEI as much as to editors that must provide for slow terminals, but it
+still applies some, as the rate at which the Lisp Machine can set up bits on the
+TV display is certainly not infinite.
+
+The second major goal of a redisplay algorithm is to not require too
+much computer time.  It may not be apparent why this is such an
+important consideration.  The main problem is that somehow the previous
+state of the screen must be compared with the new state, and
+adjustments must be made to the characters on the terminal in order to
+reflect the current state: characters must be output at various places,
+and the cursor must be positioned.  Several approaches have been taken
+to this problem.  ITS TECO, which is the underlying language of ITS
+EMACS, keeps a checksum for each pline of the screen, and by computing
+this checksum for the characters of text in the buffer being edited
+with the saved checksums it can tell whether that physical line needs
+to be updated.  Multics EMACS actually stores a map of all of the
+characters on the screen; it uses this large quantity of information in
+order to best make use of the insert/delete line facilities present in
+many modern video terminals.  Both ITS EMACS and Multics EMACS make
+use of a great many tricks to try to reduce the computation
+required in redisplay.  Both have extremely complex algorithms that
+are often difficult to maintain and debug.
+
+In the Lisp Machine, there tends to be a lot of spare computation power
+lying around for interactive problems.  A person can only type at a limited rate,
+and every microsecond between his keystrokes can be devoted to servicing
+his program; none of it has to be shared with other users.  Because of
+this, the requirement of minimum computation in redisplay was not so
+acute in ZWEI as in other editors.  Also, since the only terminal from
+which ZWEI can be used is capable of operating at very high speeds, the
+requirement of minimum transmission time was also less acute.  Sacrifices
+were made in both of these areas, in exchange for simplicity and elegance
+in the redisplay routines.
+
+The state of a window in ZWEI is remembered in the window data
+structure.  The first three elements of the structure for a pline show
+what text was being displayed on that pline.  The line being displayed
+and positions of the first and last characters of the line that were
+displayed are saved.  Usually the positions of the first and last
+characters are the first and last character positions of the line,
+unless this line is part of a line so long that it does not fit on one
+pline of the window.  Note that the line itself is stored, not the
+characters; the window does not remember what characters were displayed
+there.  If the text of the line changes, the window will continue to
+know about the same line, which now contains different characters.  How
+will it know whether the characters on the screen are the same as those
+on the line?
+
+It does this by using a special counter called the 2tick*; it is so
+named because it acts like a clock, in that it always increases.  It
+serves to impose a total order on all the events that are relevant to
+redisplay processing.  The value of the tick is increased by one
+whenever any 2redisplay event* happens.  There are two kinds of
+redisplay events: the changing of text, and the updating of windows.
+Whenever the text of a line is changed in some way (usually by an
+insertion or a deletion), a new value of the tick is obtained, and
+stored in the 3line-tick* of the line (and, of course, the value of
+the tick is increased).  Whenever redisplay outputs a pline, a new
+value of the tick is stored in the 3pline-tick* of that pline.  Thus,
+by comparing the 3pline-tick* with the 3line-tick* of the
+3pline-line* for a given pline, the redisplay algorithm can tell
+whether any text in the line has changed since the line was last
+output.  This way, much needless output is avoided.
+
+The concept of the tick is similar to that of the 2event count*
+[Reed and Kanodia].  It is also similar to the 2cnt* variable
+used in the ITS and Multics Maclisp compilers [Greenberg 2].  We were familiar
+with both of these uses of counters, and drew on these ideas to
+formulate the tick algorithm.
+
+The interval of text being displayed by a window always can (and
+usually does) grow bigger than the amount of text that can fit in the
+window at once.  So, the window always displays some subinterval of the
+interval being edited: it starts at some point in the text, and keeps
+displaying until it gets to the bottom of the window, or runs out of
+text.  This point in the interval is kept as a bp, in the
+3window-start-bp* of the window.
+
+So, the heart of the way the redisplay works is that we start at the
+3window-start-bp* of the window, and want to display this on the
+first pline.  If the line of the buffer is the same as the line in the
+3pline-line* of the window, and comparison of the ticks shows that
+the line has not been changed since the last time it was updated, then
+this pline is already showing the right thing, and we move onto the
+next line and the next pline.  Otherwise, the line must be put out on the screen.
+After all of the lines are updated, the new position of the point on the
+screen is computed and the 3window-point-blinker* of the window is
+moved there.  Finally, the underlining of the region between point and
+mark is updated; the remaining three pline elements
+(3pline-marking-left*, 3pline-marking-right*, and
+3pline-text-width*) are used to minimize the line-drawing needed to
+do this, in order to eliminate unneeded flashing of the screen.
+
+This algorithm has some other nice properties.  First of all, sometimes
+a user types in a number of commands in rapid succession, and
+performing a redisplay between each command not only would not do him
+any good, since he would not be looking at the screen until after the
+series of commands, but would slow down response time as the machine
+would be too busy computing and outputting in redisplay to perform the
+commands being given.  Therefore, when ZWEI sees that its input buffer
+contains more command characters, it does not bother to redisplay the
+screen; it just starts on the next command, and checks again when that
+command is finished.  Sooner or later, the user will stop typing, the
+input buffer will become empty (that is, there will be no more commands
+to process), and redisplay will finally happen.  Some consideration
+of the way ticks work will show that the omission of one or more redisplays does not
+damage the information in any way; all of the lines that have been changed
+at any time have had their ticks increased appropriately, and when the time
+comes to do a redisplay, all of them will be taken care of.
+
+Another desirable property of the algorithm is that it works correctly when
+several windows are trying to display the same interval of text.  Since
+the redisplaying of a window does not affect the text at all (i.e., the
+3line-tick* is changed by changes to the text, but 2not* by
+redisplaying a window) there is no interaction between the several
+windows.  In fact, this case of several windows works well in ZWEI, and
+it is interesting to watch the same text changing in several windows
+all over the screen.
+
+There is another work-saving mechanism used in ZWEI.  Some commands never
+change the state of the text being edited at all, but only change modes
+or some other internal state.  There is no reason for these commands to be
+followed by a redisplay, which would just have to check all of the lines
+in the window to find out that none of them was in need of updating.  If the
+command could somehow "tell redisplay" that nothing had changed, the work of
+one redisplay could be saved.  There are also many commands that move the point,
+but never change any text.  A redisplay that follows such a command need not
+bother to check all of the plines in the window, but can merely skip to
+the part of the algorithm in which the point blinker is positioned.
+
+ZWEI provides a way for commands to return this information to the
+redisplay mechanism.  Every command that the user calls in ZWEI is
+implemented by a Lisp function, which is called when the corresponding
+key is hit.  The value returned by these functions is interpreted as a
+number which tells the 2degree* of redisplay needed.  The smallest
+degree of redisplay is no redisplay at all, and the highest degree
+means that anything may have changed, and so all of the redisplay
+algorithm must be done.  There are a few levels in between, one of
+which means that the point may have changed position, but no text has
+changed.
+
+Whenever a command completes, this redisplay degree is noted.  When
+there is a redisplay, the maximum degree reported by any commands since
+the last redisplay is taken, and used to determine which parts of the
+redisplay algorithm must be executed.  Since it is the maximum value
+that is desired, a running maximum is kept as part of the state of the
+window, in the component called the 3window-redisplay-degree* of
+the window.
+
+One special, intermediate value of redisplay degree is provided because
+it handles a simple case that is found quite often in most editing.
+This case is where it is known that all of the changes to the buffer
+were on a certain line, after a certain point in the line.  This case
+comes up in the simple cases of the self-insert command, and most
+small deletion commands.  To report this degree, the command function must
+return three values, the second two being the line and the position in the
+line after which the changes were made.  The 2window-redisplay-line*
+and 2window-redisplay-index* are used to hold this position.
+
+Note that the redisplay degree mechanism has the same desirable
+property that we saw before, namely, that if redisplays are ever
+omitted between commands, there is no problem, because the full
+state of the window is being maintained at all times.  Whenever the
+next redisplay happens, all of the changes since the last one, and the
+degree of the redisplay that must be done, can all be found in the
+window. 
+
+.section Organization of the Code
+
+A great deal of programming experience in the past few years has
+pointed out a peril in the writing of large programs: complexity.
+When a program gets very large, and the job done by the program is
+elaborate and takes some time to explain, the program can get so
+complex that nobody could possibly keep all of it in his head at once.
+When a program is very large and complex, it becomes very hard to
+maintain, modify, improve or debug.
+
+A large body of techniques have been explored in hopes of finding
+ways to reduce the complexity of large programs, in order to combat
+these problems.  These methods were taken into account in ZWEI,
+and we used several interesting techniques in the coding to keep
+ZWEI clear and simple.  Some of these techniques were only possible
+because of the powerful features of the Lisp macro facility.
+Lisp macros allow the programmer to use Lisp to translate parts of
+his code into other code.  They constitute a sophisticated language
+feature that allows a programmer to create his own data structures
+and control structures, built on top of the Lisp language.
+
+First of all, as we have seen, all data structures were defined by
+macro-defining macros.  In this way, references to data structures were
+independent of the implementation of the data structure or the number
+or ordering of components in it.  As a result, it was easy to change
+these structures and add new elements as new features and improvements
+were put into ZWEI.  Sometimes the data-structure-defining features
+of Lisp were not sophisticated enough to create the desired data
+structure, as was the case with windows; for these cases we could simply
+define a special-purpose macro-definer to do the job.
+
+Lisp macros were also useful for the definition of new control
+structures, as well as new data structures.  In ZWEI, we created a new
+iterative control structure called 3charmap*, which iterates over
+characters in an interval.  Intervals are stored as doubly-linked lists
+of arrays, and the starting point might be in the middle of one array
+and the ending point might be in the middle of another array.  The code
+to perform this iteration was not trivial, and someone reading it might
+easily not understand the function it was performing, even though that
+function was the conceptually simple one of iterating over characters.
+So we created a macro called 3charmap* that expands into the
+double-loop code to iterate over the characters.  It is simple and
+obvious, and is used in many places, greatly reducing the size of the
+code and making the functionality obvious at a glance.
+
+For every command, it was necessary not only for a Lisp function to be defined
+that would perform the command, but also for the command to be put into
+various data structures (for example, there is a list of all commands, that
+is used by some of the built-in documentation features), and the documentation
+for that command.  It would be convenient for the documentation of a command
+to be textually close to the source code for the command, so that if a modification
+were made to the command, the documentation could easily be updated to reflect
+that change.  In order to allow this, we created a command-defining macro
+called 3defcom*.  A 3defcom* form looks like:
+
+.lisp
+(defcom 2name-of-command* 2documentation* 2options*
+   2form1*
+   2form2*
+   2form3*
+   ...)
+.end_lisp
+
+The name of the command may be any Lisp symbol, and is the name of the
+function.  By convention, all names of commands start with "3com-*";
+this makes it obvious that a function is a command, and is expected to
+return certain values (namely, the report of the redisplay degree).
+3defcom* converts Lisp function names such as
+"3com-delete-region*", and converts them into English names such as
+"Delete Region" (by removing the "3com-*", turning hyphens into
+spaces and capitalizing the words).  These English names are what the
+user sees when using the built-in documentation commands.  The
+2documentation* is a character string which explains how the command
+works.  The first line of the string is expected to make sense by
+itself, and be a brief summary of what the command does; the rest of
+the string is a longer explanation.  The first line gets used by itself
+when a shorter version of the documentation is required; for example,
+the command that documents all commands whose name contains a given
+substring would like to print out not just the names of the commands,
+but also a brief explanation of the commands.  The 2options* are used
+to include brief pieces of code in the command that appear in many
+commands.  For example, all commands that don't do anything except move
+buffer pointers are supposed to set a certain flag, to tell the main
+command loop that if the mark did exist before this command, then it
+should continue to exist.  The code for this, 3(setq *mark-stays*
+t)*, would be seen in about 40% of the commands in ZWEI and would just
+get in the way.  Therefore the option 3km* (meaning Keep Mark) is
+provided; it invisibly inserts the 3(setq *mark-stays* t)* into the
+code of the function.  The 2form*s at the end of the 3defcom* are
+the body of the function.  There is no argument list because ZWEI
+commands are always called with no arguments.
+
+Some of the more standard techniques for increasing program quality
+were used as well.  We followed the generally accepted techniques of
+structured programming, trying to keep the control structures analogous
+to the high-level description of the task at hand.  A good
+deal of time was devoted to considering the right way to modularize various
+functions, providing smooth functional interfaces that worked out well
+for many different tasks.  This was often difficult, and several times
+large pieces of code were re-written as better ways of organizing and
+modularizing became clear.  We tried to isolate all of the primitives
+that could do certain things, and then make sure that all other
+functions called that set of primitives  For example, there are a small
+number of functions that actually perform insertion of text, and they
+are careful always to relocate buffer pointers and maintain the
+3line-tick* of the lines they affect; the rest of the ZWEI functions
+work by calling these, and so nobody else has to worry about relocation
+and ticks. This way, the assertions that buffer pointers get relocated and
+that ticks reflect all changes are both maintained.  We uniformly
+indented the code in accordance with the control structure; this task
+was made overwhelmingly easy by the text editor being used (ITS EMACS),
+which, like ZWEI, has an excellent set of commands for working with the
+printed representation of Lisp list structure.
+
+Another point of programming practice had been made clear some time ago
+to all of the developers of the Lisp Machine software.  There are many
+different ways to abbreviate words, and once a name of a function or
+global variable is made to contain an abbreviation, everyone has to
+remember which abbreviation was used.  In the early days of Lisp
+machine coding, the environment abounded with all kinds of incompatible
+abbreviations.  A particularly exasperating word was "function", which
+could be written as any of "function", "fnctn", "fctn", "fcn", or "fn";
+each one of these spellings appeared in at least one function name in
+the Lisp system, and some of them still exist.  It became a policy to
+try to avoid abbreviations in most cases.  In ZWEI, we made a list of
+several words that were used extremely often, and established
+"official" abbreviations for them, and always used only those abbreviations.
+These included "bp" for "buffer
+pointer", "beg" for "beginning", and "char" for "character".  Words not
+on this list were always spelled out in full.  Although this sometimes
+made function names rather long, we feel that the gain in cleanliness
+was well worth it.  Another convention was to always use the words "forward"
+and "backward" instead of "forwards" and "backwards"; this seems like a little
+thing, but it prevented a large number of annoying bugs.
+
+Similar problems inspired us to be very careful with function names in
+general, and to establish naming conventions and calling conventions.
+For example, all functions that take some action on an interval of text
+end in "3-interval*"; for example, there are functions named
+3delete-interval*, 3save-interval*, 3copy-interval*,
+3upcase-interval*, and so on.  All such functions take the interval
+as their last required argument, and then accept an optional argument
+after that.  If the optional argument is not given, then the first
+argument is an interval.  If the optional argument is given, then the
+first of the two is the starting bp of the interval and the second is
+the ending bp of the interval.  This way, if a caller has two bps and
+wants to do something to the text between them, he need not allocate an
+interval array merely so the callee can take it apart again.  There are
+several conventions of this type used throughout ZWEI.
+
+One thing that we took great care with was the management of global
+variables.  A global variable is effectively an input and output
+parameter or a state variable for every function that uses it, and the
+fact that the variable is part of the function's "black box" behavior
+can be far from clear after a casual examination of the code.  Previous
+ZWEI implementation efforts suffered from a great, uncontrolled use of
+global variables, which became a serious problem in
+ZWEI's ability to interface to the rest of the Lisp world.  This would
+mean that the editor could be called from more than one Lisp
+environment, and there could be problems in interaction between the
+global variables in the two environments.  Also, it was not clear just
+what part of the global state had to be set up in order for everything
+to work right.
+
+Therefore, in ZWEI, we were very careful to distinguish between several
+kinds of global variables.  There is one group of variables all of which are part of the
+operating environment of the editor; these are usually repositories for
+state between commands.  They include the numeric arguments that
+commands can take, and the states of various interactions between
+commands that are defined to take special action when executed in
+sequence.  These variables are all given their 3special* declarations
+in one place, and each has a comment as to what it is for.  At every point
+at which an editor command environment is created, 2all* of these
+variables must be lambda-bound, in order to prevent interaction with
+other editor environments.  These variables have no "top-level" values,
+but are always lambda-bound and always apply to only one
+environment.  A second kind of global variable is really some kind of
+editor parameter or option, which a user might want to change but
+probably wants to stay the same.  These variables are declared
+3special* together in a second group, and any editor environment that
+wants to bind them may do so, but need not.  Usually these variables
+represent modes and options that any particular person will probably
+want the same way in any environment in which he edits.  A set of
+commands is provided for examining and setting these options. Each option has
+associated built-in documentation; a macro called 3defvar* (for "define
+variable") is used to create variables and associate with them
+their documentation, a default value, and a specification of what kind of
+value will work correctly for them.
+
+Since the general nature of the user interface to the Lisp Machine is
+still being built, all input/output functions were made accessible only
+through a restricted set of functions.  This way, when the management
+of screen space or something is changed, ZWEI can be changed
+correspondingly with minimum effort.  ZWEI has a line of status
+information, and some lines in which it can prompt the user and accept
+answers; these lines are always reached by means of a small set of
+functions.  All redisplay is done through one function, called
+3redisplay*.  Earlier implementations of the Lisp Machine editor did
+not have this modularity, and many problems arose because of it.
+
+.chapter The Future
+
+In this chapter, we discuss some of the interesting problems in ZWEI
+that still have not been solved, and suggest some directions for the
+future.
+
+.section Fonts
+
+The graphics capability of the Lisp Machine TV allows the display of
+text in any typeface, or 2font*, that the user wants.  ZWEI takes
+advantage of this by attempting to provide commands that change the
+font of sections of text, and a command that changes the font in which
+text is being entered.  A large number of fonts in various different
+sizes and styles already exist, and the user can create his own using a
+font editor.
+
+The hardcopy device used at the A.I. Lab is a Xerox Graphics Printer,
+which, like the TVs, can produce output in arbitrary fonts.  The users
+have been taking advantage of this capability for a long time, using
+the fonts to produce italicized and boldface text, and chapter and
+section headings, as is done in this paper.  However, the fonts were
+specified by the user by the insertion of font-change commands in their
+text, and the text justifying program that processed the text would
+convert these commands to font changes for the hardcopy device.  The
+user would never see the fonts when editing.  It was hoped that with
+ZWEI, the user could just put things in the font he was using, and have
+his paper come out as he saw it in front of him.
+
+There are several problems with the way the font commands work.  First
+of all, when the user wants to specify a font, he should not have to
+type the full name of the font, as the names of fonts must be at least
+several characters long in order to be mnemonic.  Also, one cannot put
+any character in any arbitrary font, because the way characters with
+fonts are stored is by combining the numeric code for the character
+with a number indicating which font the character is in; the font
+number is then looked up in a table, called the 2font map*, which is
+stored as part of the "piece of paper" data structure.  Therefore, the
+way fonts are specified now is that the user gives a list of accessible
+fonts, and this list is made to be the font map for the window's piece
+of paper.  From then on, the user can refer to those fonts as fonts A,
+B, C, etc.  Unfortunately, this is not a very natural way to specify
+fonts for a paper.  The concepts that one has in mind when writing a
+paper usually speak of italicization, boldness, size, and style.  It
+has been suggested that the ZWEI commands somehow reflect this kind of
+thinking.  Since the relations between fonts (such as, this is the same
+style as that, this is the same size as that, this is a bold version of
+that) are conceptually part of the fonts, and not related to editors at
+all, ZWEI largely awaits the development of an improved font format
+that can give it this information.
+
+Another problem is that the resolution of the hardcopy device is still
+much better than than of the TV, and a font that is of a good size in
+hardcopy will look very large on the TV.  This makes it difficult to
+edit a manuscript using the fonts in which it will eventually be
+printed.  One suggested solution is to use scaled-down versions of the
+fonts when editing on the TV; a problem with this is that after
+considerable effort, we have not found a mechanical way to reduce a
+font's scale that does not leave the font looking distorted in some
+way.
+
+.section Structured Text
+
+There is a text editor called NLS [*****] that treats text
+not as a simple sequence of characters, but a tree or hierarchy of
+sequences of characters.  NLS provides a large number of commands for
+manipulating such a tree, moving branches around and so on.  It also
+provides an advanced set of options called 2viewspecs* that specify
+how the text is displayed on the screen; you can ask for only a certain
+range of levels to appear, or ask for only a certain number of lines from
+certain levels, and so on.
+
+There is something appealing about this idea.  Papers tend to have a
+hierarchy of chapters, sections, and subsections, and programs also
+tend to look hierarchical, especially if they have some sort of block
+structure.  Editor commands that understand such concepts could be
+useful for manipulating the sections of a chapter, for example, and
+letting the user change their order.
+
+One of the ideas in the design of the ZWEI data structure was to allow
+some of these things to be done easily.  It would be possible to set up
+a tree of things called 2nodes*, each of which has an associated
+interval, and which together form such a tree of text [see figure 3].
+Each node would know about the next and previous nodes, its
+parent node, and its first child node.  The reason that intervals are
+allowed to start and end in the middle of lines is just so that this
+kind of structure could be created.  However, ZWEI does not yet take
+advantage of this.
+
+.page
+.nofill
+                 References
+
+[Anderson]  Anderson, Owen T.  "The Design of an Editor-Writing
+System", S. B. thesis, Dept. of Physics, MIT, Feb. 1979
+
+[Ciccarelli]  Ciccarelli, Eugene E., "An Introduction to the
+EMACS Editor", MIT Artificial Intelligence Lab Memo 447,
+January 1978.
+
+[English et al]  English, W. K., Engelbart, D. C., and Berman, M. L.,
+"Display Selection Techniques for Text Manipulation," 2IEEE
+Transactions on Human Factors in Electronics*, Vol. HFE-8, No. 1,
+March 1967.
+
+[Greenberg 1]  Greenberg, Bernard S., "Real-Time Editing on Multics"
+Multics Technical Bulletin 373, April 1978, Honeywell, Inc.,
+Cambridge Mass.
+
+[Greenberg 2]  Greenberg, Bernard S., "The Multics MACLISP
+Compiler--The Basic Hackery.," Unpublished paper, December 1977.
+Available from author, Honeywell Inc., Cambridge, Mass.
+
+[Reed and Kanodia]  Reed, David P. and Kanodia, R., "Synchronization
+with Eventcounts and Sequencers," CSR Request For Comments #138,
+Laboratory for Computer Science, MIT.
+
+[Stallman]  Stallman, Richard M., online EMACS doumentation, MIT
+Artificial Intelligence Laboratory.
+
+[Weinreb and Moon]  Weinreb, Daniel L. and Moon, David A.
+"The Lisp Machine Manual",  MIT Artificial Intelligence
+Laboratory, 1978.
+
+.eof
+

@@ -1,0 +1,332 @@
+
+;;; This file is part of EINE, the Lisp Machine editor.        -*-LISP-*-
+;;; For more information see LISPM2;EINE INFO.
+
+;; This file contains functions for searching.
+
+(DECLARE (SETQ RETAIN-VARIABLE-NAMES-SWITCH 'ARGS))
+(DECLARE (SETQ OPEN-CODE-MAP-SWITCH T))
+
+;;;;; First, the functions for searching (themselves).
+
+(DEFUN ED-SEARCH (BP STRING REVERSEP)
+    (COND (REVERSEP (ED-BACKWARD-SEARCH BP STRING))
+	  (T (ED-FORWARD-SEARCH BP STRING))))
+
+;MUST WORK FOR FIXNUM AS WELL AS ARRAY STRINGS.
+(DEFUN ED-FORWARD-SEARCH (BP STRING &AUX NLPOS)
+    (COND ((NUMBERP STRING)
+	   (ED-IBP (ED-CHAR-SEARCH BP STRING)))
+          ((NOT (STRINGP STRING))
+           (ERROR "You must search for a STRING or CHAR -- ED-FORWARD-SEARCH" STRING))
+          ((SETQ NLPOS (STRING-SEARCH-CHAR 215 STRING))
+           (ED-FORWARD-SEARCH-CR-FULL BP STRING NLPOS))
+	  (T
+           (DO ((LN (ED-BP-LINE-NUM BP) (1+ LN))
+                (CP (ED-BP-CHAR-POS BP) 0)
+                (TEM)
+                (LIM (ED-BUFFER-FILL-POINTER)))
+               ((>= LN LIM) NIL)
+             (AND (SETQ TEM (STRING-SEARCH STRING (AR-1 ED-OPEN-BUFFER LN) CP))
+                  (RETURN (ED-BP (+ TEM (STRING-LENGTH STRING))
+                                 (AR-1 ED-OPEN-BUFFER LN) 'TEMP)))))))
+
+(DEFUN ED-BACKWARD-SEARCH (BP STRING &AUX NLPOS)
+    (COND ((NUMBERP STRING)
+	   (ED-REVERSE-CHAR-SEARCH BP STRING))
+          ((NOT (STRINGP STRING))
+           (ERROR "You must search for a STRING or CHAR -- ED-FORWARD-SEARCH" STRING))
+          ((SETQ NLPOS (STRING-REVERSE-SEARCH-CHAR 215 STRING))
+           (ED-BACKWARD-SEARCH-CR-FULL BP STRING NLPOS))
+	  (T
+           (DO ((LN (ED-BP-LINE-NUM BP) (1- LN))
+                (CP (ED-BP-CHAR-POS BP) NIL)
+                (TEM))
+               ((MINUSP LN) NIL)
+             (AND (SETQ TEM (STRING-REVERSE-SEARCH STRING (AR-1 ED-OPEN-BUFFER LN) CP))
+                  (RETURN (ED-BP TEM (AR-1 ED-OPEN-BUFFER LN) 'TEMP)))))))
+
+
+(DEFUN ED-FORWARD-SEARCH-CR-FULL (BP STRING &OPTIONAL NLPOS
+                                     &AUX CHAR1 CRLEADS TBP LEN START-CP STRING-L LINE)
+  (OR NLPOS (SETQ NLPOS (STRING-SEARCH-CHAR 215 STRING)))
+  (OR NLPOS (ERROR "String does not contain a newline -- ED-SRC" STRING))
+  (SETQ STRING-L (ARRAY-ACTIVE-LENGTH STRING)
+        CHAR1 (AR-1 STRING 0)
+        CRLEADS (= CHAR1 215)
+        TBP (ED-COPY-BP BP 'TEMP))
+  (*CATCH 'ED-EOB
+          (DO ((LN (ED-BP-LINE-NUM BP) (1+ LN))
+               (CP (ED-BP-CHAR-POS BP) 0)
+               (LIM (ED-BUFFER-FILL-POINTER)))
+              ((>= LN LIM) NIL)
+            (AND (>= (SETQ LEN (ARRAY-ACTIVE-LENGTH (SETQ LINE (AR-1 ED-OPEN-BUFFER LN))))
+                     NLPOS)
+                 (>= (SETQ START-CP (- LEN NLPOS))
+                     CP)
+                 (OR CRLEADS (CHAR-EQUAL CHAR1 (AR-1 LINE START-CP)))
+                 (PROGN (ED-MOVE-BP TBP LN START-CP)
+                        (DO ((I 1 (1+ I)))
+                            ((>= I STRING-L) T)
+                          (OR (CHAR-EQUAL (ED-ILDB TBP) (AR-1 STRING I))
+                              (RETURN NIL))))
+                 (RETURN (ED-IBP TBP))))))
+
+
+(DEFUN ED-BACKWARD-SEARCH-CR-FULL (BP STRING &OPTIONAL NLPOS
+                                      &AUX CHARL CRTRAILS TBP LEN START-CP STRING-L LINE)
+  (OR NLPOS (SETQ NLPOS (STRING-REVERSE-SEARCH-CHAR 215 STRING)))
+  (OR NLPOS (ERROR "String does not contain a newline -- ED-SEARCH" STRING))
+  (SETQ STRING-L (ARRAY-ACTIVE-LENGTH STRING)
+        CHARL (AR-1 STRING (1- STRING-L))
+        CRTRAILS (= CHARL 215)
+        TBP (ED-COPY-BP BP 'TEMP))
+  (SETQ NLPOS (- (- STRING-L NLPOS) 2))
+  (*CATCH 'ED-BOB
+          (DO ((LN (ED-BP-LINE-NUM BP) (1- LN))
+               (CP (ED-BP-CHAR-POS BP) 7777777))
+              ((MINUSP LN) NIL)
+            (SETQ LEN (ARRAY-ACTIVE-LENGTH (SETQ LINE (AR-1 ED-OPEN-BUFFER LN))))
+            (AND (>= LEN NLPOS)
+                 (<= NLPOS CP)
+                 (OR CRTRAILS (CHAR-EQUAL CHARL (AR-1 LINE NLPOS)))
+                 (PROGN (ED-MOVE-BP TBP LN NLPOS)
+                        (DO ((I (- STRING-L 2) (1- I)))
+                            ((< I 0) T)
+                          (ED-DBP TBP)
+                          (OR (CHAR-EQUAL (ED-BP-CHAR TBP) (AR-1 STRING I))
+                              (RETURN NIL))))
+                 (RETURN TBP)))))
+
+
+; LINE-NUM-LIM is the first line-num NOT to be searched.
+(DEFUN ED-CHAR-SEARCH (BP CHAR &OPTIONAL (LINE-NUM-LIM (ED-BUFFER-FILL-POINTER
+							ED-OPEN-BUFFER)))
+    (DO ((LINE-NUM (ED-BP-LINE-NUM BP) (1+ LINE-NUM))
+	 (CHAR-POS)
+	 (CHAR-FROM (ED-BP-CHAR-POS BP) 0))
+	((>= LINE-NUM LINE-NUM-LIM) NIL)
+      (AND (SETQ CHAR-POS (STRING-SEARCH-CHAR CHAR (AR-1 ED-OPEN-BUFFER LINE-NUM) CHAR-FROM))
+	   (RETURN (ED-BP CHAR-POS (AR-1 ED-OPEN-BUFFER LINE-NUM) 'TEMP)))))
+
+(DEFUN ED-REVERSE-CHAR-SEARCH (BP CHAR &OPTIONAL (LINE-NUM-LIM -1) &AUX LINE-NUM CHAR-POS)
+    (COND ((< (SETQ LINE-NUM (ED-BP-LINE-NUM BP)) LINE-NUM-LIM)
+	   NIL)
+	  ((SETQ CHAR-POS
+		 (STRING-REVERSE-SEARCH-CHAR CHAR (ED-BP-LINE BP) (ED-BP-CHAR-POS BP)))
+	   (ED-BP CHAR-POS (ED-BP-LINE BP) 'TEMP))
+	  (T (DO ((LN (1- LINE-NUM) (1- LN)))
+		 ((<= LN LINE-NUM-LIM) NIL)
+	       (AND (SETQ CHAR-POS (STRING-REVERSE-SEARCH-CHAR CHAR (AR-1 ED-OPEN-BUFFER LN)))
+		    (ED-BP CHAR-POS (AR-1 ED-OPEN-BUFFER LN) 'TEMP))))))
+
+;;;;; Next, the user interface stuff.
+
+(DEFUN ED-COM-CHAR-SEARCH (CHR &AUX CHAR)
+  (PROG (REVERSEP BJP ZJP STRING)
+	(SETQ ED-MARK-STAYS T)
+	(TV-ACTIVATE-PC-PPR ED-ECHO-PC-PPR)
+   LOOP (TV-SET-CURSORPOS ED-ECHO-PC-PPR 0 0)
+        (TV-CLEAR-EOL ED-ECHO-PC-PPR)
+        (AND BJP (TV-STRING-OUT ED-ECHO-PC-PPR "Begin "))
+        (AND ZJP (TV-STRING-OUT ED-ECHO-PC-PPR "End "))
+        (AND REVERSEP (TV-STRING-OUT ED-ECHO-PC-PPR
+                                     "Reverse "))
+        (TV-STRING-OUT ED-ECHO-PC-PPR
+                       "Search: ")
+        (SETQ CHAR (FUNCALL ED-COMMAND-STREAM 'TYI))
+        (COND ((OR (= CHAR 541) (= CHAR 501))	     ;CONTROL A
+	       (TV-DEACTIVATE-PC-PPR ED-ECHO-PC-PPR)
+               (RETURN (ED-AUX-COM-STRING-SEARCH REVERSEP BJP ZJP)))
+              ((OR (= CHAR 522) (= CHAR 562))	     ;CONTROL R
+               (SETQ REVERSEP (NOT REVERSEP))
+               (GO LOOP))
+              ((OR (= CHAR 502) (= CHAR 542))	     ;CONTROL B
+               (SETQ BJP T ZJP NIL REVERSEP NIL)
+               (GO LOOP))
+              ((OR (= CHAR 505) (= CHAR 545))	     ;CONTROL E
+               (SETQ ZJP T BJP NIL REVERSEP T)
+               (GO LOOP))
+	      ((OR (= CHAR 507) (= CHAR 547))	     ;CONTROL G
+	       (TV-BEEP)
+	       (GO QUIT))
+              ((OR (= CHAR 523) (= CHAR 563))	     ;CONTROL S
+	       (OR ED-SEARCH-RING (ED-BARF))
+               (SETQ STRING (CAR ED-SEARCH-RING))
+	       (COND ((NUMBERP STRING) (TV-TYO ED-ECHO-PC-PPR STRING))
+		     (T (TV-STRING-OUT ED-ECHO-PC-PPR STRING))))
+	      ((> CHAR 220)	                     ;RANDOM CONTROL CHARACTER
+	       (TV-BEEP)
+	       (GO LOOP))
+	      (T
+	       (SETQ STRING CHAR)
+	       (ED-SEARCH-RING-PUSH CHAR)
+	       (TV-TYO ED-ECHO-PC-PPR STRING)))
+	(ED-MOVE-POINT (ED-SEARCH (COND (BJP
+					 (ED-BUFFER-BOB-BP))
+					(ZJP
+					 (ED-BUFFER-EOB-BP))
+					(T (ED-BUFFER-POINT)))
+				  STRING
+				  REVERSEP))
+   QUIT (TV-DEACTIVATE-PC-PPR ED-ECHO-PC-PPR)
+        (RETURN ED-DIS-BPS)))
+
+(DEFUN ED-COM-STRING-SEARCH (CHR)
+    (SETQ ED-MARK-STAYS T)
+    (ED-AUX-COM-STRING-SEARCH NIL NIL NIL))
+
+(DEFUN ED-AUX-COM-STRING-SEARCH (REVERSEP BJP ZJP &AUX TEM)
+    (PROG (STRING CHAR)
+          (SETQ ED-MARK-STAYS T)
+          (SETQ STRING (MAKE-ARRAY DEFAULT-ARRAY-AREA ART-STRING 200 NIL '(0)))
+	  (TV-ACTIVATE-PC-PPR ED-ECHO-PC-PPR)
+    REDIS (TV-SET-CURSORPOS ED-ECHO-PC-PPR 0 0)
+          (TV-CLEAR-EOL ED-ECHO-PC-PPR)
+          (AND BJP (TV-STRING-OUT ED-ECHO-PC-PPR "Begin "))
+          (AND ZJP (TV-STRING-OUT ED-ECHO-PC-PPR "End "))
+          (AND REVERSEP (TV-STRING-OUT ED-ECHO-PC-PPR "Reverse "))
+          (TV-STRING-OUT ED-ECHO-PC-PPR "String search: ")
+          (TV-STRING-OUT ED-ECHO-PC-PPR STRING)
+     LOOP (SETQ CHAR (FUNCALL ED-COMMAND-STREAM 'TYI))
+          (COND ((BITTEST 400 CHAR)
+                 (SETQ CHAR (CHAR-UPCASE (LOGAND 377 CHAR)))
+                 (SELECT CHAR
+                         (## B (SETQ BJP T ZJP NIL REVERSEP NIL)
+                               (GO REDIS))
+                         (## E (SETQ BJP NIL ZJP T REVERSEP T)
+                               (GO REDIS))
+                         (## G (TV-BEEP)
+			       (TV-DEACTIVATE-PC-PPR ED-ECHO-PC-PPR)
+                               (RETURN ED-DIS-BPS))
+                         (## D (SETQ TEM (ED-SEARCH-RING-POP))
+			       (COND ((NUMBERP TEM)
+				      (SETQ STRING (MAKE-ARRAY DEFAULT-ARRAY-AREA ART-STRING
+							       200 NIL '(1)))
+				      (AS-1 TEM STRING 0))
+				     (T (SETQ STRING TEM)))
+			       (GO REDIS))
+                         (## L (GO REDIS))
+                         (## Q (SETQ CHAR (LOGAND 377 (FUNCALL ED-COMMAND-STREAM 'TYI)))
+                               (GO NORMAL))
+                         (## R (SETQ REVERSEP (NOT REVERSEP))
+                               (GO REDIS))
+                         ;(## S (SEARCH, THEN RETURN TO READIN LOOP))
+                         (OTHERWISE (TV-BEEP)
+                                    (GO REDIS))))
+                ((= CHAR 207)
+		 (OR (ZEROP (ARRAY-LEADER STRING 0))
+		     (ARRAY-POP STRING))
+                 (GO REDIS))
+                ((= CHAR ## )
+		 (TV-TYO ED-ECHO-PC-PPR CHAR)
+                 (ED-SEARCH-RING-PUSH STRING)
+                 (ED-MOVE-POINT (ED-SEARCH (COND (ZJP (ED-BUFFER-EOB-BP))
+                                                 (BJP (ED-BUFFER-BOB-BP))
+                                                 (T (ED-BUFFER-POINT)))
+                                           STRING 
+                                           REVERSEP))
+		 (TV-DEACTIVATE-PC-PPR ED-ECHO-PC-PPR)
+                 (RETURN ED-DIS-BPS)))
+          (SETQ CHAR (LOGAND 377 CHAR))
+   NORMAL (ARRAY-PUSH STRING CHAR)
+          (TV-TYO ED-ECHO-PC-PPR CHAR)
+          (GO LOOP)
+          ))
+
+;; Incremental search.
+
+(DEFUN ED-COM-INCREMENTAL-SEARCH (CHR)
+   (ED-INCREMENTAL-SEARCH (< ED-NUMERIC-ARG 0)))
+
+(DEFUN ED-COM-REVERSE-INCREMENTAL-SEARCH (CHR)
+   (ED-INCREMENTAL-SEARCH (> ED-NUMERIC-ARG 0)))
+
+(DEFUN ED-INCREMENTAL-SEARCH (REVERSE-P)
+    (PROG (STRING FAILING-P LH CHAR QUIT-P SAVE-CHAR RESULT
+		  MUST-REDIS BP NOW-BP TEM NOW-BP-BEGIN)
+          (SETQ ED-MARK-STAYS T)
+	  (SETQ LH (PC-PPR-LINE-HEIGHT ED-ECHO-PC-PPR))
+          (SETQ STRING (MAKE-ARRAY DEFAULT-ARRAY-AREA ART-STRING 200 NIL '(0)))
+	  (SETQ NOW-BP (ED-BUFFER-POINT))
+	  (SETQ NOW-BP-BEGIN (ED-COPY-BP NOW-BP 'TEMP))
+	  (TV-ACTIVATE-PC-PPR ED-ECHO-PC-PPR)
+    REDIS (SETQ MUST-REDIS NIL)
+	  (TV-SET-CURSORPOS ED-ECHO-PC-PPR 0 0)
+          (TV-CLEAR-EOL ED-ECHO-PC-PPR)
+	  (AND FAILING-P (TV-STRING-OUT ED-ECHO-PC-PPR "Failing "))
+	  (AND REVERSE-P (TV-STRING-OUT ED-ECHO-PC-PPR "Reverse "))
+	  (TV-STRING-OUT ED-ECHO-PC-PPR "I-Search")
+	  (TV-SET-CURSORPOS ED-ECHO-PC-PPR 0 LH)
+	  (TV-STRING-OUT ED-ECHO-PC-PPR "Search: ")
+          (TV-CLEAR-EOL ED-ECHO-PC-PPR)
+	  (TV-STRING-OUT ED-ECHO-PC-PPR STRING)
+     LOOP (SETQ CHAR (SETQ SAVE-CHAR (FUNCALL ED-COMMAND-STREAM 'TYI)))
+          (COND ((BITTEST 400 CHAR)
+		 (SETQ CHAR (CHAR-UPCASE (LOGAND 377 CHAR)))
+                 (SELECT CHAR
+			 (## S (COND ((ZEROP (ARRAY-ACTIVE-LENGTH STRING))
+				      (SETQ TEM (ED-SEARCH-RING-POP))
+				      (COND ((NUMBERP TEM)
+					     (SETQ STRING (MAKE-ARRAY DEFAULT-ARRAY-AREA
+								      ART-STRING 200 NIL '(1)))
+					     (AS-1 TEM STRING 0))
+					    (T (SETQ STRING TEM)))
+				      (GO SEARCH-ORIGIN))
+				     (T (AND REVERSE-P (SETQ MUST-REDIS T))
+                                        (SETQ REVERSE-P NIL)
+					(GO SEARCH-CURRENT-END))))
+                         (## Q (SETQ CHAR (LOGAND 377 (FUNCALL ED-COMMAND-STREAM 'TYI)))
+                               (GO NORMAL))
+			 (## R (OR REVERSE-P (SETQ MUST-REDIS T))
+                               (SETQ REVERSE-P T)
+			       (GO SEARCH-CURRENT-END))
+			 (## G ;;; Should see if you are failing and do gross hair.
+			       (TV-BEEP)
+			       (GO FINI))
+			 (OTHERWISE
+			       (FUNCALL ED-COMMAND-STREAM 'UNTYI SAVE-CHAR)
+			       (GO FINI))))
+		((= CHAR ## )
+		 (COND ((ZEROP (ARRAY-ACTIVE-LENGTH STRING))
+			(RETURN (ED-AUX-COM-STRING-SEARCH NIL NIL NIL)))
+		       (T (OR FAILING-P
+			      (ED-MOVE-POINT NOW-BP))
+			  (GO FINI))))
+		((= CHAR 207)
+		 (COND ((ZEROP (ARRAY-ACTIVE-LENGTH STRING))
+			(TV-BEEP)
+			(GO REDIS))
+		       (T (ARRAY-POP STRING)
+			  (SETQ MUST-REDIS T)
+			  (GO SEARCH-ORIGIN)))))
+   NORMAL (TV-TYO ED-ECHO-PC-PPR CHAR)
+          (ARRAY-PUSH STRING CHAR)			;And drop in.
+
+;  SEARCH-CURRENT
+          (ED-MOVE-BP NOW-BP-BEGIN NOW-BP)
+	  (ED-MOVE-BP-BACKWARD NOW-BP-BEGIN (1- (ARRAY-ACTIVE-LENGTH STRING)))
+	  (SETQ BP NOW-BP-BEGIN)
+	  (GO SEARCH)
+   SEARCH-CURRENT-END
+	  (SETQ BP NOW-BP)
+	  (GO SEARCH)
+   SEARCH-ORIGIN
+          (SETQ BP (ED-BUFFER-POINT))
+   SEARCH (SETQ RESULT (ED-SEARCH BP STRING REVERSE-P))
+          (COND ((NULL RESULT)
+		 (SETQ MUST-REDIS (OR MUST-REDIS (NOT FAILING-P)))	;If we just entered 
+		 (OR FAILING-P (TV-BEEP))
+		 (SETQ FAILING-P T))			; failing, then redisplay regardless.
+		(T
+		 (SETQ NOW-BP RESULT)
+		 (ED-WINDOW-REDISPLAY NOW-BP ED-WINDOW)
+		 (SETQ MUST-REDIS (OR MUST-REDIS FAILING-P))
+		 (SETQ FAILING-P NIL)))
+	  (COND (MUST-REDIS (GO REDIS))
+		(T (GO LOOP)))
+     FINI (TV-DEACTIVATE-PC-PPR ED-ECHO-PC-PPR)
+          (TV-CLEAR-PC-PPR ED-ECHO-PC-PPR)
+          (RETURN ED-DIS-BPS)
+
+))

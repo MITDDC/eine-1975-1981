@@ -1,0 +1,118 @@
+;;; -*-LISP-*- Text Justifier init file
+;;; This file contains parameters and stuff you don't want to bother compiling
+
+;;; Loader
+(COMMENT LIST 60000 FIXNUM 20000))
+(ALLOC '(LIST 60000 FIXNUM 20000)) ;Lisp doesn't seem to believe it otherwise?
+
+(PROGN ;Prevent typage
+(SETQ PURE 2)
+(SSTATUS GCWHO 1)
+(FASLOAD (LMMAN)JUST)
+(FASLOAD (LMMAN)JIN)
+(FASLOAD (LMMAN)JOUT)
+(FASLOAD (LMMAN)STR)
+(INIT-STRING-SPACE 100)
+(FASLOAD (LIBLSP)FONTRD)
+(FASLOAD (LMMAN)LMRQ) ;Supposedly Lisp-machine-manual specific stuff "macros"
+(SORT '(1) 'LESSP)  ;Don't get gc array relocation later on.  Sigh.
+
+;;; Useful parameters
+
+(SETQ BARF-STOP-P T)  ;Causes breakpoint on errors
+
+;;; Fontery
+
+;These numbers are the numbers you put after ^F, not the internal font numbers
+(SETQ FONT-LIST '( |dsk:xfont;times 12rom|	;0  Alignment and Measurement font
+		   |dsk:xfont;times 12rom|	;1  Main text font.  English text. 
+		   |dsk:xfont;times 12ital|	;2  Italic text font.
+		   |dsk:lmman;font3 kst|	;3  Lisp code font (code in text)
+		   |dsk:lspman;37vrbl kst|	;4  Chapter headings font.
+		   |dsk:lmman;font3 kst|	;5  Section headings font.
+		   |dsk:lmman;font3 kst|	;6  Subsection headings font.
+		   |dsk:lmman;30flsp kst|	;7  Lisp block-code font
+		   |dsk:lmman;font3 kst|	;8  Function name font
+		   ))
+
+;;; Ligature tables, one for each font.  The final output includes the xgp font number.
+;;; These ligatures are for the XFONT character set.
+;;; Currently these arrays are indexed by the number you put after ^F,
+;;; not the internal font number.  Should this change??
+(ARRAY JIN-FONT-LIGATURE-TABLE T 20)
+(STORE (JIN-FONT-LIGATURE-TABLE 1)	;Text font
+       '( (146 (151 . 26)	;fi -> 26 in font 0
+	       (154 . 27)	;fl -> 27 in font 0
+	       (146 (151 . 30)	;ffi -> 30 in font 0
+		    (154 . 31)	;ffl -> 31 in font 0
+		    . 25)	;ff -> 25 in font 0
+	       . 146)		;f -> 146 in font 0
+	  (55 (55 . 2)		;-- -> 2 in font 0 (em dash)
+	      . 55)
+	 ))
+(STORE (JIN-FONT-LIGATURE-TABLE 2)	;Italic font
+       '( (146 (151 . 1026)	;fi -> 26 in font 1
+	       (154 . 1027)	;fl -> 27 in font 1
+	       (146 (151 . 1030);ffi -> 30 in font 1
+		    (154 . 1031);ffl -> 31 in font 1
+		    . 1025)	;ff -> 25 in font 1
+	       . 1146)		;f -> 146 in font 1
+	 ))	   
+
+;;; This array has the amount of extra space to put when leaving this font.
+(ARRAY FONT-ITALIC-CORRECTION FIXNUM 10)
+(FILLARRAY 'FONT-ITALIC-CORRECTION '(0 4 0 0 0 0 0 0))
+
+;;; Layout parametry
+
+;These are for use with ;TOPMAR 0 ;BOTMAR 0, and ;LFTMAR 0
+;48. raster units is supposed to be 1/4 inch
+;Have to have real & bound margins, and separate for odd & even pages.
+
+(SETQ ODD-LEFT-MARGIN (* 5 48.)
+      EVEN-LEFT-MARGIN (* 5. 48.)
+      ODD-RIGHT-MARGIN (* 30. 48.)  ;7 3/4 inches
+      EVEN-RIGHT-MARGIN (* 30. 48.) ;7 1/4 inches
+      EXTRA-LEFT-INDENT-FIRST-LINE-OF-PARAGRAPH (* 1. 48.) ;1/4 inch
+      INTERPARAGRAPH-LEADING 32.    ;1/6 inch
+      MIN-WHITE-SPACE-BETWEEN-WORDS 13.  ;1/15 inch minus epsilon
+      THIN-SPACE-WIDTH 8	    ;1/24 inch
+      XGP-VSP 6
+      TOP-HEADING-VPOS 192. ;1 inch
+      TOP-TEXT-VPOS (* 6 48.)  ;1 1/2 inch
+      ALARM-VPOS  (* 39. 48.) ;9 3/4 inches
+      BOTTOM-HEADING-VPOS 1950. ;Last possible place with default margins, 40-high lines
+      FILL-MODE-P T)
+
+(SETQ ODD-TOP-LEFT-HEADING (STRING '|A Real-time Display-oriented Editor|)
+      EVEN-TOP-LEFT-HEADING (STRING '|A Real-time Display-oriented Editor|)
+      ODD-TOP-RIGHT-HEADING (STRING '|A Real-time Display-oriented Editor|)
+      EVEN-TOP-RIGHT-HEADING (STRING '|A Real-Time Display-oriented Editor|))
+
+;Some vertical spacing parameters
+(SETQ SECTION-PRE-LEADING 64.
+      SECTION-POST-LEADING 32.
+      SUBSECTION-PRE-LEADING 64.
+      SUBSECTION-POST-LEADING 32.
+      CHAPTER-POST-LEADING 40.
+      DEFUN-PRE-LEADING 32.  ;Also applies to DEFMAC, DEFVAR, etc.
+      THIN-LEAD-MILLS 80.
+      CHAPTER-TOC-LEADING 19.)
+
+;;; Tom-Filery
+
+
+
+;;; Command Interface
+;;; There should also be a version of this which uses small fonts, etc., for XD
+
+(SETQ LOG-FILE NIL VARIABLES-LOADED-P NIL)
+
+(DEFUN LMMAN ()
+  (PROG (LOG-FILE)
+    (SETQ LOG-FILE (OPEN '|dlw2; .th LOG| '(OUT ASCII SINGLE)))
+    (TJ '((DLW2) TH XGP) '(|DLW2;TH >|))
+    (CLOSE LOG-FILE)))
+
+);end of PROGN
+

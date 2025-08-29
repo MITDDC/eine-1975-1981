@@ -1,0 +1,180 @@
+
+Date: 13 JAN 1979 1851-EST
+From: HENRY at MIT-AI (Henry Lieberman)
+To: INFO-EMACS at MIT-AI, (BUG LISPM) at MIT-AI
+
+A suggestion for a feature: When in two window mode, when I want to edit the code in
+the other window, I often make the mistake of  typing Control-X B rather than
+Control-X O, which is  what I'd do with a single window to edit that code.  How bout
+a command which took a buffer name, and if  that buffer is in the other window,
+switch windows,  otherwise switch buffers. 
+
+Comment: moon@MIT-AI (Sent by ___070@MIT-AI) 12/09/78 19:22:05 Re: bug eine
+Comment: *** END OF ORIGINAL HEADER ***
+Date: 12/09/78 19:22:05
+From: moon at MIT-AI
+Sender: ___070@MIT-AI
+Re:   bug eine
+
+The c-m-V command doesn't move the other window's point, so that when you
+go back to it with ^X O, it jumps back to where it was before.
+
+Comment: MOON@MIT-AI 11/01/78 23:27:28 Re: Eine
+Comment: *** END OF ORIGINAL HEADER ***
+Date: 11/01/78 23:27:28
+From: MOON at MIT-AI
+Re:   Eine
+
+The 3rd prompt in Query Replace should not be just "Query Replace",
+it should be `Query Replace "foo" by "bar"'
+
+
+        
+
+
+
+Comment: RG@MIT-AI 11/10/78 06:35:40
+Comment: *** END OF ORIGINAL HEADER ***
+Date: 11/10/78 06:35:40
+From: RG at MIT-AI
+
+I find that the View directory command in eine is less useful than it might
+be, since I often wish to scroll backwards in the directory list.  Did you get a chance
+to look at the directory lister on the alto?  It has some very nice features.
+
+Comment: GLS@MIT-AI 11/12/78 01:42:57 Re: EINE
+Comment: To: DLW at MIT-AI
+Comment: CC: GLS at MIT-AI
+Comment: *** END OF ORIGINAL HEADER ***
+Date: 11/12/78 01:42:57
+From: GLS at MIT-AI
+To:   DLW
+cc:   GLS
+Re:   EINE
+
+By "a way to view the text of a command" I meant a simple way to
+say "edit code for this key" followed by the key.  I couldn't
+locate (from the keyboard, within two minutes) the convention for
+mapping keys to editor coommand names.  (A desirre for this
+feature goes double for mouse commands!  Also, maybe some bucky-?
+command should document a mouse button, if therre is none such
+already.  Maybe mashing all the mouse buttons at once could cause
+help?)
+
+Maybe APROPOS shoudl flag each of thhe commands it lists as to
+its permissible use.  If a mouse command or a key command is not
+actually on a key, then it looks like any command that is Meta-X-able.
+
+Comment: RG@MIT-AI 10/08/78 19:03:57
+Comment: To: (BUG EINE) at MIT-AI
+Comment: *** END OF ORIGINAL HEADER ***
+Date: 10/08/78 19:03:57
+From: RG@MIT-AI
+To:   (BUG EINE) at MIT-AI
+
+  IF YOU MAKE CHANGES TO A BUFFER, THEN DECIDE TO READ THE OLD COPY
+BACK IN FROM THE 10, IT PRINTS THE MESSAGE ABOUT DO YOU WANT TO
+WRITE OUT.. THEN DROPS DEAD BECAUSE THE OPERATION TYI IS NOT SUPPORTED
+BY TV-MAKE-STREAM-INTERNAL.
+
+Comment: DLW@MIT-AI 09/02/78 21:33:31
+Comment: *** END OF ORIGINAL HEADER ***
+Date: 09/02/78 21:33:31
+From: DLW@MIT-AI
+
+Have EINE decide whether to redisplay on the basis of a function
+of no args.  The function should check macros, AND typeahead.  Make sure
+that the listen operation is doing the right thing, including
+CADR's micrcoded typeahead stuff.
+
+Comment: DLW@MIT-AI 09/02/78 21:32:47
+Comment: *** END OF ORIGINAL HEADER ***
+Date: 09/02/78 21:32:47
+From: DLW@MIT-AI
+
+Change ED-UPDATE-MODE-LINE to take an optional "do it now" arg,
+else to set a flag.  Have ED-TYI update mode line if flag set.  Alternatively
+use the clobbered-p of the tvob as the flag.  Make sure all I/O to terminal
+stream is through ED-TYI.
+
+Comment: MAP@MIT-AI 09/05/78 06:19:49
+Comment: To: (BUG LISPM) at MIT-AI
+Comment: *** END OF ORIGINAL HEADER ***
+Date: 09/05/78 06:19:49
+From: MAP@MIT-AI
+To:   (BUG LISPM) at MIT-AI
+
+Fairly new world (just 17000@G'ed on CADR).  Loaded PAINT and
+HACKS...in editor, ZOWIE and BARFOLA on.  In an empty buffer:
+^S for incremental search typed FFOO got TRAP 3255 (ARGTYP ARRAY M-A NIL GAHDR) -> ARRAY-LEADER
+Some arg to array-leader, nil, was of wrong type.
+In ed-forward-search _ ed-search
+
+Comment: RG@MIT-AI 09/09/78 10:37:08
+Comment: To: (BUG EINE) at MIT-AI
+Comment: *** END OF ORIGINAL HEADER ***
+Date: 09/09/78 10:37:08
+From: RG@MIT-AI
+To:   (BUG EINE) at MIT-AI
+
+  C-M-V IN TWO WINDOW MODE BOMBS OUT.
+
+Comment: RG@MIT-AI 09/14/78 10:22:06
+Comment: To: (BUG EINE) at MIT-AI
+Comment: *** END OF ORIGINAL HEADER ***
+Date: 09/14/78 10:22:06
+From: RG@MIT-AI
+To:   (BUG EINE) at MIT-AI
+
+  IF THE CURSOR IS IMMEDIATELY TO THE RIGHT OF A CLOSE PAREN THAT
+FAILS TO MATCH ANYTHING (IE YOU HAVE A CASE OF TOO MANY CLOSES),
+THE CURSOR DISAPPEARS ENTIRELY.  TO MAKE THIS HAPPEN, THE
+TOP OF THE BUFFER MUST NOT BE BEING DISPLAYED (IE OFF THE TOP OF THE
+WINDOW).
+When you use the ed-buffer-stream with the limit bp,
+it always goes to the end of the limited line, instead
+of stopping in the middle.
+    
+Have ED-BARF take FORMAT args.  Where should errors be reported, anyway?
+
+Make window-hacking-ok-p more like EMACS.  Note ED-AT-TOP-LEVEL-P
+exists for this purpose.
+
+Make debug mode work better.  Have command to turn on and off.
+Have there be a debug tvob, which is only used if in debug mode.
+debug mode redefines any windows to be above a certain line, moves
+up the status area etc.  Other errors should grab-display, etc.
+
+Cause permanent macros to go in the right package.
+
+Make an ED-UTILITY-WINDOW for edit ..d and things like that.  It is the
+size of the screen and always in TVFONT.
+
+Low-space warning.
+
+virtual bounds
+
+EDIT ..D
+
+view buffer
+
+[TRY THIS] Should ED-MUST-REDISPLAY really go to all the
+exposed windows?  Usually you have only messed up one.  Think about this.
+
+Command to check balencing of all parens in buffer.
+
+[EDFN] Hint: when you kill a buffer, you have to get rid of the pointer to
+it that EDVAL would use to find it.  Foo.
+
+The deactivates in ED-RECOVER are both crocks and should go.
+
+Several control Y's foloowed by several contrl W's.  Need more state for this?
+ 
+Somehow, we should make Backnext Help get you documentation on macros.
+
+Have ED-REDEFINE-WINDOW know about
+sideways-p and inverse-video-p, and have commands to hack this.
+MM Sideways and MM Reverse Video, which normally toggle, arg = 0
+means turn off, arg otherwise means turn on.
+
+Meta-Y should do the comparison, as EMACS does.

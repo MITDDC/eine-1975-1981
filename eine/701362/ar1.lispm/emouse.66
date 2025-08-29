@@ -1,0 +1,248 @@
+;;;Mouse handler for editor			-*-LISP-*-
+;  This is mostly for the editor, but some of the functions in here
+;  may be useful to other programs.
+
+;Specials
+(DECLARE (SPECIAL
+	 MOUSE-X			;where the mouse is, in screen coordinates.  
+         MOUSE-Y			; .. 
+         MOUSE-REGION			;data structure for region it's currently in.
+         MOUSE-BLINKER			;The blinker which follows the mouse
+	 MOUSE-X-SCALE			;Numerator . Denominator, multiply by this
+	 MOUSE-Y-SCALE			; to scale from mouse units to tv raster units.
+	 TABLET-X-SCALE			;Likewise for tablet
+	 TABLET-Y-SCALE			; ..
+	 MOUSE-REGION-TABLE		;A list of MOUSE-REGIONs, see defstruct below.
+	 MOUSE-TABLET-P			;T => use tablet instead of mouse
+      ;The above are part of the interface, the rest are internal.
+      ;Note that MOUSE-X can be negative.
+      ;MOUSE-X and MOUSE-Y are where the cursor really points.  The arrow or whatever
+      ;will be drawn suitably offset from there.  MOUSE-BLINKER is not created in this
+      ;program; it is a roving blinker which is the usual thing used to track the mouse.
+	 MOUSE-HARDWARE-X		;Last hardware readin for computing deltas 
+	 MOUSE-HARDWARE-Y
+	 MOUSE-TRANSLATION-LIST		; (see below)
+         MOUSE-DOUBLE-CLICK-TIME-CONST	;Delay for detecting double clicks
+         MOUSE-BOUNCE-TIME-CONST	;Delay for bounce elimination
+         KBD-SIMULATED-CLOCK-FCN-LIST	;Executed every 60th of a second
+         MOUSE-ROLLOVER			;Bit mask for button pushed and not yet released
+	 TABLET-WAS-NOT-PROX-FLAG	;Unlike the mouse, the tablet has a finite physical
+	 				; range. To get the effect of picking up the mouse,
+					; we ignore for cursor moving purposes the first
+					; value that comes back after the tablet moves
+					; back into proximity.
+))			     
+
+;Magic unibus locations used:
+; 764200 Mouse Y register
+; 764202 Mouse X (and buttons) register
+; 764040 Tablet status register
+; 764042 Tablet X register
+; 764044 Tablet Y register
+
+;Mouse region structure.  MOUSE-REGION-TABLE is a list of these.  Each region
+;defines a rectangular area on the screen and what to do when the mouse is in
+;that area.  Note that you can have pseudo areas which are off to the left of
+;the screen, as long as you don't try to display a tracking cursor actually
+;off the screen.
+;The MOUSE-REGION-TABLE list is always scanned left to right, so that overlapping
+;regions will work properly.
+;Many mouse region structures will be longer than this, the additional elements
+;being used for purposes specific to that type of region.  The defstructs
+;had better agree in their initial part.
+(DEFSTRUCT (MAKE-MOUSE-REGION) ARRAY 
+	MOUSE-REGION-NAME		;A symbol
+	MOUSE-REGION-X-MIN		;Coordinates of upper left corner of rectangle.
+	MOUSE-REGION-Y-MIN		;..			(inclusive)
+	MOUSE-REGION-X-MAX		;Coordinates of lower right corner of rectangle.
+	MOUSE-REGION-Y-MAX		;..			(exclusive)
+	MOUSE-REGION-NUMBER		;Inserted in returned "character" by KBD-OR-MOUSE-TYI.
+	MOUSE-REGION-ENTER-FCN		;NIL or function to call (region) when entering.
+	MOUSE-REGION-LEAVE-FCN		;NIL or function to call (region) when leaving.
+	MOUSE-REGION-MOVE-FCN		;Called (region,x,y) to put mouse tracker at (x,y)
+					;When this is called, MOUSE-X and MOUSE-Y still
+					;indicate the previous position, which may be useful.
+)
+
+;Calibration constants
+(COND ((NULL (BOUNDP 'MOUSE-HARDWARE-X)) (SETQ MOUSE-HARDWARE-X 0)))
+(COND ((NULL (BOUNDP 'MOUSE-HARDWARE-Y)) (SETQ MOUSE-HARDWARE-Y 0)))
+ 
+(SETQ MOUSE-X-SCALE '(2 . 3)
+      MOUSE-Y-SCALE '(2 . 3)
+      TABLET-X-SCALE '(-1 . 2)
+      TABLET-Y-SCALE '(1 . 2)
+      TABLET-WAS-NOT-PROX-FLAG NIL 
+      MOUSE-TRANSLATION-LIST '(2 0 1)	;For the first mouse.
+;     MOUSE-TRANSLATION-LIST '(0 1 2)	;For the second mouse.
+      MOUSE-REGION-TABLE NIL		;A list of MOUSE-REGIONs, see defstruct above.
+      MOUSE-REGION NIL
+      MOUSE-DOUBLE-CLICK-TIME-CONST 6000 ;DELAY FOR PUSH AGAIN
+      MOUSE-BOUNCE-TIME-CONST 200        ;DELAY FOR BOUNCE ELIMINATION
+      MOUSE-TABLET-P NIL
+      MOUSE-ROLLOVER 0)
+ 
+;Call this to read the word of mouse buttons.
+;1 is the tail button, 2 the middle, 4 the head button.
+;This exists because of the possibility of using the tablet in place of the mouse.
+(DEFUN MOUSE-BUTTON-WORD (&AUX TEM)
+  (COND ((NOT MOUSE-TABLET-P)
+	 (LDB 1403 (%UNIBUS-READ 764200)))
+	(T (LOGIOR (COND ((BITTEST (SETQ TEM (%UNIBUS-READ 764040)) 4000)
+			  1)
+			 (T 0))
+		   (COND ((BITTEST TEM 100)
+			  0)
+			 (T 2))
+		   (COND ((BITTEST TEM 1000)
+			  4)
+			 (T 0)))))) 
+
+;Call this to read (as two values) the mouse X and Y position.
+;This is an internal routine to centralize the %UNIBUS-READ for the sake
+;of the tablet.  Returns no value, but updates MOUSE-HARDWARE-X and 
+;MOUSE-HARDWARE-Y.
+(DEFUN MOUSE-HARDWARE-UPDATE (&AUX TEM)
+    (COND ((NOT MOUSE-TABLET-P)
+	   (SETQ MOUSE-HARDWARE-X (// (* (CAR MOUSE-X-SCALE)
+                                         (LOGAND (%UNIBUS-READ 764202) 7777))
+                                      (CDR MOUSE-X-SCALE)))
+	   (SETQ MOUSE-HARDWARE-Y (// (* (CAR MOUSE-Y-SCALE)
+                                         (LOGAND (%UNIBUS-READ 764200) 7777))
+                                      (CDR MOUSE-Y-SCALE))))
+	  ((BITTEST (SETQ TEM (%UNIBUS-READ 764040)) 200)	;See if new data ready yet
+	   (AND (BITTEST TEM 20)
+		(SETQ TABLET-WAS-NOT-PROX-FLAG T))
+	   (SETQ MOUSE-HARDWARE-X (// (* (CAR TABLET-X-SCALE)
+                                         (LOGAND 7777 (%UNIBUS-READ 764042)))
+                                      (CDR TABLET-X-SCALE)))
+	   (SETQ MOUSE-HARDWARE-Y (// (* (CAR TABLET-Y-SCALE)
+                                         (LOGAND 7777 (%UNIBUS-READ 764044)))
+                                      (CDR TABLET-Y-SCALE)))
+	   (%UNIBUS-WRITE 764040 6)    ;START TABLET AGAIN
+)))
+
+;Call this to change where the mouse thinks it is.
+;This has to be called first to get variables initialized.
+(DEFUN MOUSE-SET-POS (X Y)
+  (MOUSE-HARDWARE-UPDATE)
+  (SETQ MOUSE-X (1+ X) MOUSE-Y Y)  ;In case these have never been initialized
+  (MOUSE-FOLLOW))
+
+;Call this to update the mouse cursor.  Returns T if it actually moved.
+;Determines what region it is in and calls appropriate region-dependent routines.
+(DEFUN MOUSE-FOLLOW (
+		     &AUX X Y DX DY OHX OHY NEW-REGION TEM)
+  (SETQ OHX MOUSE-HARDWARE-X OHY MOUSE-HARDWARE-Y)
+  (MOUSE-HARDWARE-UPDATE)
+  (SETQ DX (LOGAND (- MOUSE-HARDWARE-X OHX) 7777)   	;See where hardware
+	DY (LOGAND (- MOUSE-HARDWARE-Y OHY) 7777))	; has moved to.
+  (AND (>= DX 4000) (SETQ DX (- DX 10000)))		;Sign-extend
+  (AND (>= DY 4000) (SETQ DY (- DY 10000)))		;Sign-extend
+  (COND ((AND (ZEROP DX) (ZEROP DY))
+	 NIL)			;No motion, return NIL
+	((AND MOUSE-TABLET-P TABLET-WAS-NOT-PROX-FLAG)
+	 (SETQ TABLET-WAS-NOT-PROX-FLAG NIL)      ;just comming into prox, ignore
+	 NIL)
+	(T			;Moved, update the blinker and return T
+
+	 (SETQ X (+ MOUSE-X DX) Y (+ MOUSE-Y DY))	;Compute proposed new position
+	 ;Compute what region this position lies in.  If outside all regions,
+	 ;leave it in the last valid place.  If this would leave it in a region not in
+         ;the table, warp the mouse to the top-left corner of some region.
+         (DO ((L MOUSE-REGION-TABLE (CDR L)))
+             ((NULL L)                          ;If not in any region,
+              (COND ((MEMQ MOUSE-REGION MOUSE-REGION-TABLE) ;If last place acceptable,
+                     (SETQ X MOUSE-X            ;Warp back to there
+                           Y MOUSE-Y
+                           NEW-REGION MOUSE-REGION))
+                    (T            ;That's not acceptable, warp into a reasonable one
+                     (SETQ X (MOUSE-REGION-X-MIN (SETQ NEW-REGION (CAR MOUSE-REGION-TABLE)))
+                           Y (MOUSE-REGION-Y-MIN NEW-REGION)))))
+           (SETQ NEW-REGION (CAR L))
+           (AND (>= X (MOUSE-REGION-X-MIN NEW-REGION))
+                (>= Y (MOUSE-REGION-Y-MIN NEW-REGION))
+                (< X (MOUSE-REGION-X-MAX NEW-REGION))
+                (< Y (MOUSE-REGION-Y-MAX NEW-REGION))
+                (RETURN NIL)))          ;It lies within this region, stop search.
+         (COND ((NEQ NEW-REGION MOUSE-REGION) ;Switching regions
+                (AND MOUSE-REGION
+                     (SETQ TEM (MOUSE-REGION-LEAVE-FCN MOUSE-REGION))
+                     (FUNCALL TEM MOUSE-REGION))
+                (SETQ MOUSE-REGION NEW-REGION)
+                (AND (SETQ TEM (MOUSE-REGION-ENTER-FCN NEW-REGION))
+                     (FUNCALL TEM NEW-REGION))))
+         (FUNCALL (MOUSE-REGION-MOVE-FCN NEW-REGION) NEW-REGION X Y)
+         (SETQ MOUSE-X X MOUSE-Y Y)
+         T)))  ;Return T to indicate that the mouse moved.
+
+;Returns keyboard character 0-1777 or mouse "char" 2000+BUTTON+<NTIMES-1>*10+REGION*100
+;BUTTON is 0=tail, 1=middle, 2=head.
+(DEFUN KBD-OR-MOUSE-TYI (&OPTIONAL (WHOSTATE "TYIMOUSEI"))
+  (PROG (CH (TIME 0) BLOCKED)
+   TP (COND ((SETQ CH (KBD-TYI-NO-HANG))	;Look for keyboard input 
+	     (COND ((= CH 204)			;<ESC> key
+		    (KBD-ESC)
+		    (GO TP))
+		   ((= CH 203)			;<CALL> key
+		    (BREAK CALL T)
+		    (GO TP))
+		   (T (GO RT))))		;Ordinary key, return it
+
+	    ((SETQ CH (MOUSE-BUTTON-ENCODE))	;Look for mouse button input
+	     (SETQ CH (+ 2000			;Set bit to show this is a mouse character
+			 CH			; also pass region number code
+			 (* (MOUSE-REGION-NUMBER MOUSE-REGION) 100)))
+	     (GO RT)))				; and go return it
+
+      (COND ((NOT BLOCKED)			;No input yet, wait
+	     (SETQ BLOCKED T)
+	     (TV-NOTE-INPUT)))			;Remember that we waited for user input	     
+      (PROCESS-WAIT WHOSTATE (FUNCTION
+                              (LAMBDA ()
+                                      (MOUSE-FOLLOW)
+                                      (OR (KBD-CHAR-AVAILABLE)
+                                          (NOT (ZEROP (MOUSE-BUTTON-WORD)))
+                                          ))))
+      (GO TP)
+
+      ;Here to return CH
+   RT (RETURN CH)))
+
+;This function keeps track of double-clicks, and returns the code
+;for which mouse button was pushed and how many times.  It deliberately
+;does not track the mouse, since motion while pushing buttons is
+;probably unintentional.  If no button is pushed, it returns NIL,
+;otherwise it returns the button code documented above.
+(DEFUN MOUSE-BUTTON-ENCODE (&AUX SW CH)
+  (SETQ SW
+	(LOGAND 7				;Get bits for interesting buttons
+		(BOOLE 2 ;ANDCA
+		       (PROG1 MOUSE-ROLLOVER	;Mask un-interesting buttons
+			      (SETQ MOUSE-ROLLOVER	;then update if lifted
+				    (LOGAND MOUSE-ROLLOVER
+					    (SETQ SW (MOUSE-BUTTON-WORD)))))
+		       SW)))
+  (COND ((ZEROP SW) NIL)			;If no button pushed, result is NIL
+	(T					;Otherwise, cogitate for a while:
+	 (SETQ SW (LOGAND (MINUS SW) SW))	;Pick only one bit if multiple buttons pushed.
+	 (SETQ CH (NTH (LOGAND 3 SW)		;JFFO to get character-code to return
+		       MOUSE-TRANSLATION-LIST))
+	 (*CATCH 'MOUSE-BUTTON-ENCODE		;Throw here when ready to return
+	   (DO () (NIL)				;Do forever (until guy's finger wears out)
+	     (DO I MOUSE-BOUNCE-TIME-CONST (1- I) (= I 0))  ;Bounce delay
+	     (DO I MOUSE-DOUBLE-CLICK-TIME-CONST (1- I) NIL ;Look for key to be lifted 
+	       (COND ((= I 0)
+		      (SETQ MOUSE-ROLLOVER SW)	;Timed out, button is still down
+		      (*THROW 'MOUSE-BUTTON-ENCODE CH))
+		     ((ZEROP (LOGAND (MOUSE-BUTTON-WORD) SW))
+		      (RETURN NIL))))		;Button came up, enter next loop
+	     (DO I MOUSE-BOUNCE-TIME-CONST (1- I) (= I 0))  ;Bounce delay		 
+	     (DO I MOUSE-DOUBLE-CLICK-TIME-CONST (1- I) NIL ;Look for key to be pushed again
+	       (COND ((= I 0)
+		      (SETQ MOUSE-ROLLOVER 0)	;Timed out, button is up
+		      (*THROW 'MOUSE-BUTTON-ENCODE CH))
+		     ((NOT (ZEROP (LOGAND (MOUSE-BUTTON-WORD) SW)))
+		      (SETQ CH (+ CH 8))	;Button pushed again, this is a double click
+		      (RETURN NIL)))))))))	;Continue scanning <for triple click!>
+

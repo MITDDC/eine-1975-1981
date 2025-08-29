@@ -1,0 +1,15 @@
+Display terminal stream operations for Lisp Machine streams.
+
+SET-CURSOR	ARG1 is X character position, ARG2 is Y.
+CLEAR-EOF	Clear to end of screen.
+CLEAR-EOL	Clear to end of line.
+CLEAR-CHAR	Clear at the cursor position.
+NEWLINE		%TDCRL???
+FORWARD		Move forward one.
+HOME-CLEAR	Home up and clear the screen.
+BELL		Ring bell.
+MOVE-LINES	ARG1 = First line to be moved. ARG2 = # of lines. 
+			ARG3 = Where to move top line.
+MOVE-CHARS	Like MOVE-LINES, but in characters.
+OUTPUT-RESET	???
+

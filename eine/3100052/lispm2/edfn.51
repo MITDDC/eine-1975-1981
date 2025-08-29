@@ -1,0 +1,468 @@
+;;; This file is part of EINE, the Lisp Machine editor.       -*-LISP-*-
+;;; For more information see LISPM2;EINE INFO.
+
+;;; Version 3 of EDFN.           12/1/77 DLW
+
+(DECLARE (SETQ RETAIN-VARIABLE-NAMES-SWITCH 'ARGS))
+(DECLARE (SETQ OPEN-CODE-MAP-SWITCH T))
+(ENDF HEAD)
+
+;-foo- indicates section loss.
+;; Given a file symbol, make sure that this file is not being
+;; edited in one buffer, and read in its "directory".
+(DEFUN ED-ASSURE-FILE-SCANNED (FILE-SYMBOL)
+    (AND (GET FILE-SYMBOL 'ED-FILE-BUFFER)
+	 (ED-BARF "The file " FILE-SYMBOL
+		  "is being edited in the buffer" (GET FILE-SYMBOL 'ED-FILE-BUFFER)))
+    (OR (GET FILE-SYMBOL 'ED-FILE-SECTION-LIST)
+	(ED-SCAN-FILE FILE-SYMBOL))
+    NIL)
+
+(DECLARE (SPECIAL IBASE))
+
+;; For every section of the file, set up its ED-RANGE and ED-FILE,
+;; and set up the ED-FILE-SECTION-LIST of the file, with all buffer names
+;; as NIL.  It also sets up the file symbol's initial ED-FILE-ID property,
+;; and adds it to ED-FILE-LIST.
+(DEFUN ED-SCAN-FILE (FILE-SYMBOL &AUX (IBASE 10.) TEM)
+    (FILE-COMMAND-CAREFUL "MAPRD " (GET-PNAME FILE-SYMBOL))
+    (DO ((STRING (FILE-COMMAND "NEXTDEF 0")
+		 (FILE-COMMAND "NEXTDEF " (FORMAT-STRING NIL "~D" POS)))
+	 (POS 0)	; Our current position in the file.
+	 (START)	; The START char-pos of this section.
+	 (SIZE)		; The SIZE in chars of this section.
+	 (NAME)		; The section-symbol.
+	 (SLIST NIL))	; The ED-FILE-SECTION-LIST.
+	((STRING-EQUAL "FUNCTION NOT FOUND" STRING)
+	 (PUTPROP FILE-SYMBOL (REVERSE SLIST) 'ED-FILE-SECTION-LIST))
+      (MULTIPLE-VALUE (START TEM) (READ-FROM-STRING STRING))
+      (MULTIPLE-VALUE (SIZE TEM) (READ-FROM-STRING STRING TEM))
+      (MULTIPLE-VALUE (NAME TEM) (READ-FROM-STRING STRING TEM))
+      (SETQ POS (+ POS SIZE))
+      (AND (GET NAME 'ED-RANGE)	;If NAME is already someone's section-symbol.
+	   (SETQ NAME (ED-SECTION-BUFFER-NAME NAME FILE-SYMBOL)))
+      (PUTPROP NAME (LIST START SIZE) 'ED-RANGE)
+      (PUTPROP NAME FILE-SYMBOL 'ED-FILE)
+      (PUSH NAME SLIST))
+    (PUTPROP FILE-SYMBOL (STRING-APPEND (FILE-COMMAND "MAPINFO")) 'ED-FILE-ID)
+    (PUSH FILE-SYMBOL ED-FILE-LIST)
+    (FILE-COMMAND "MAPFLS")
+    NIL)
+
+;; Given a section name and a file name (symbol or string), create a new
+;; section-symbol made to look like  section-fn1-fn2-dev:-sname;
+(DEFUN ED-SECTION-BUFFER-NAME (SECTION FILE-NAME &AUX TEM I)
+    (SETQ SECTION (STRING SECTION) FILE-NAME (STRING FILE-NAME))
+    (SETQ I (STRING-SEARCH " " FILE-NAME (1+ (STRING-SEARCH " " FILE-NAME))))
+    (SETQ TEM (STRING-APPEND SECTION "-"
+			     (NSUBSTRING FILE-NAME (1+ I) (STRING-LENGTH FILE-NAME))
+			     "-" (NSUBSTRING FILE-NAME 0 I)))
+    (AS-1 ## - TEM (STRING-SEARCH " " TEM))
+    (AS-1 ## - TEM (STRING-SEARCH " " TEM))
+    (INTERN TEM))
+
+(DEFUN ED-COM-EDIT-DEFINITION (CHR &AUX SYMBOL)
+    (ED-EDIT-DEFINITION (INTERN (ED-GET-STRING-FROM-MINI-BUFFER
+				 "Name of function or section:"))))
+
+;ED-EDIT-DEFINITION, given a symbol, tries its utmost to select a buffer
+;containing that symbol's function definition,
+;either by finding an existing one (made by a previous use of this function)
+;or by reading the definition from the PDP-10 into a new buffer.
+
+;The first argument is interpreted as a section-symbol.
+(DEFUN ED-EDIT-DEFINITION (SECTION &OPTIONAL FILE &AUX TEM)
+  (PROG ()
+    (OR (SYMBOLP SECTION)
+	(ED-BARF "I need a symbol! -- ED-EDIT-DEFINITION"))
+
+    ;; If the symbol is a buffer name, just select it.
+    (COND ((SETQ TEM (GET SECTION 'ED-BUFFER))
+	   (ED-SELECT-BUFFER ED-WINDOW (ED-OPEN-BUFFER TEM))
+	   (RETURN ED-DIS-BUFFER)))
+
+    ;; Then it has not been read in.  If we have not read the directory of
+    ;; the file which the user is thinking of, figure out which file that is
+    ;; and read it in, hoping that this section will be found.
+    (COND ((NULL (GET SECTION 'ED-FILE))
+	   (SETQ FILE (OR FILE
+			  (GET SECTION 'ED-DEFINING-FILE)
+			  (INTERN
+			   (ED-GET-DEFAULTED-FILE-NAME
+			    (FORMAT-STRING NIL "Read ~S from which file? "
+					   SECTION)))))
+	   (ED-ASSURE-FILE-SCANNED FILE)))
+
+    (COND ((SETQ TEM (GET SECTION 'ED-FILE))
+	   (ED-SELECT-BUFFER ED-WINDOW (ED-OPEN-BUFFER (ED-READ-SECTION-OF-FILE SECTION TEM)))
+	   (RETURN ED-DIS-BUFFER))
+	  (T (ED-BARF (FORMAT-STRING NIL "Couldn't find section ~S in file ~A."
+				     SECTION
+				     (GET-PNAME FILE)))))
+    ))
+
+;; Read in a given section of a file.  The first arg must be a section-symbol.
+;; IF YOU CHANGE THIS change the corresponding stuff in ED-LOAD-WHOLE-FILE.
+(DEFUN ED-READ-SECTION-OF-FILE (SECTION FILE &AUX STREAM RANGE ED-OPEN-BUFFER)
+    (ED-VERIFY-FILE FILE)
+    (OR (SETQ RANGE (GET SECTION 'ED-RANGE))
+	(ERROR " is not a section-symbol." SECTION))
+    (AND (GET SECTION 'ED-BUFFER)
+	 (ED-KILL-BUFFER SECTION))
+    (SETQ STREAM (FILE-MAPPED-OPEN (STRING FILE)))
+    (FILE-COMMAND (FORMAT-STRING NIL "MAPSET ~D ~D" (FIRST RANGE) (SECOND RANGE)))
+    (SETQ ED-OPEN-BUFFER (ED-READ-IN-BUFFER STREAM SECTION))
+    (FILE-COMMAND "MAPFLS")
+    (PUTPROP SECTION (ED-TICK) 'ED-TICK)
+    (SETF (ED-BUFFER-TYPE) 'SECTION)
+    (SETF (ED-BUFFER-PATHNAME) FILE)
+    ED-OPEN-BUFFER)
+
+;; Make sure that nobody has changed this file behind our backs.
+(DEFUN ED-VERIFY-FILE (FILE &AUX OUR-ID REAL-ID)
+    (COND ((SETQ OUR-ID (GET FILE 'ED-FILE-ID))
+	   (FILE-COMMAND "MAPRD " (STRING FILE))
+	   (SETQ REAL-ID (STRING-APPEND (FILE-COMMAND "MAPINFO")))
+	   (FILE-COMMAND "MAPFLS")
+	   (OR (STRING-EQUAL OUR-ID REAL-ID)
+	       (ERROR " has been modified on the file computer." FILE)))))
+
+;???THIS HAS NOT BEEN CHECKED???
+(DEFUN ED-EVAL-FILE-HEAD (FILE)
+  (PROG (STREAM)
+    (AND (GET FILE 'ED-HEAD-EVALLED) (RETURN NIL))
+    (SETQ STREAM (FILE-MAPPED-OPEN FILE))
+    (OR (EQUAL (FILE-COMMAND "FINDDEF HEAD")
+	       "FUNCTION NOT FOUND")
+	(DO ((EOF (NCONS NIL)) (FORM))
+	    ((EQ EOF (SETQ FORM (READ EOF STREAM))))
+	    (COND ((AND (LISTP FORM) (EQ (CAR FORM) 'DECLARE))
+		   (MAPC (FUNCTION EVAL) (CDR FORM)))
+		  (T (EVAL FORM)))))
+    (FILE-COMMAND "MAPFLS")
+    (PUTPROP FILE ED-TICK 'ED-HEAD-EVALLED)))
+
+;;; PRINT THE LIST OF FILES, OR A FILE'S LIST OF FUNCTIONS.
+
+;; Takes a file symbol.
+(DEFUN ED-LIST-FUNCTIONS-IN-FILE (FILE &OPTIONAL (STREAM STANDARD-OUTPUT)
+				       &AUX SECTION-LIST TEM (FILE-STRING (GET-PNAME FILE)))
+    (COND ((SETQ TEM (GET FILE 'ED-FILE-BUFFER))
+	   (FORMAT-STRING STREAM "The file ~A is all being edited in buffer ~A.~%"
+			  FILE-STRING
+			  (GET-PNAME (ED-BUFFER-NAME TEM))))
+	  ((SETQ SECTION-LIST (GET FILE 'ED-FILE-SECTION-LIST))
+
+              (COND ((ED-FILE-MUNGED-P FILE)
+                     (FORMAT-STRING STREAM "From file ~A, these functions need updating:~%"
+                                    (GET-PNAME FILE))
+                     (ED-PRINT-LIST-WITH-COMMAS
+                         (MAPCAN (FUNCTION (LAMBDA (SECT)
+                                    (AND (SETQ TEM (GET SECT 'ED-BUFFER))
+					 (ED-BUFFER-MUNGED-P TEM)
+                                         (NCONS SECT))))
+                                 SECTION-LIST)
+                          STREAM)
+		     (TERPRI STREAM))
+                    ((FORMAT-STRING STREAM "File ~A needs no updating.~%" FILE-STRING))) 
+              (COND ((NOT (ED-FILE-TOTALLY-MUNGED-P FILE))
+                     (FORMAT-STRING STREAM "These functions are present, unmodified:~%")
+                     (ED-PRINT-LIST-WITH-COMMAS
+                         (MAPCAN (FUNCTION (LAMBDA (SECT)
+                                    (AND (SETQ TEM (GET SECT 'ED-BUFFER))
+					 (NOT (ED-BUFFER-MUNGED-P TEM))
+					 (NCONS SECT))))
+                                 SECTION-LIST)
+                           STREAM)
+                     (TERPRI STREAM))))
+	  (T (FORMAT-STRING STREAM "No functions have been read in from the file ~A"
+			    FILE-STRING))))
+
+(DEFUN ED-COM-LIST-FUNCTIONS-IN-FILE (CHR)
+    (ED-LIST-FUNCTIONS-IN-FILE
+     (INTERN (ED-GET-DEFAULTED-FILE-NAME "List functions in file: ")))
+    ED-DIS-BUFFER)
+
+(DEFUN ED-COM-PRINT-FILE-LIST (CHR &AUX (FIRSTFILE T)
+				   (STANDARD-OUTPUT ED-ECHO-STREAM))
+       (TV-CLEAR-PC-PPR ED-ECHO-PC-PPR)
+       (PRINC "Functions are being edited from these files:")
+       (TERPRI)
+       (ED-PRINT-LIST-WITH-COMMAS ED-FILE-LIST)
+       (TERPRI)
+       ED-DIS-NONE)
+
+;;; FORGET A FILE, OR A FUNCTION.
+
+(DEFUN ED-COM-KILL-BUFFER (CHR &AUX TEM)
+    (SETQ TEM (ED-COMPLETING-READ-PROMPT  "Buffer to kill (RETURN to kill current buffer): "
+					  ED-BUFFER-MODE-LIST ED-BUFFER-ALIST
+					  ED-COMMAND-STREAM T T))
+    (COND ((MEMQ TEM '(0 NIL)) (ED-BARF))
+	  ((STRINGP TEM)
+	   (COND ((ZEROP (STRING-LENGTH TEM)) (ED-KILL-BUFFER ED-OPEN-BUFFER))
+		 (T (ED-BARF))))
+	  (T (ED-KILL-BUFFER (CDR TEM))))
+    ED-DIS-NONE)
+
+;If it was read in from a file, update the EDFN data base.
+;This takes either a buffer or a buffer name.
+(DEFUN ED-KILL-BUFFER (BUFFER &AUX BUFFER-NAME TEM FILE)
+    (AND (SYMBOLP BUFFER) (SETQ BUFFER (GET BUFFER 'ED-BUFFER)))
+    (SETQ BUFFER-NAME (ED-BUFFER-NAME BUFFER))
+
+;; Try to fix up any pointers to the dying buffer.
+    (AND (EQ BUFFER ED-OPEN-BUFFER) (SETQ ED-OPEN-BUFFER NIL))
+    (AND (EQ BUFFER ED-PREVIOUS-OPEN-BUFFER)
+	 (SETQ ED-PREVIOUS-OPEN-BUFFER
+	       (COND (ED-BUFFER-ALIST (CDAR ED-BUFFER-ALIST))
+		     (T ED-OPEN-BUFFER))))
+
+;; Fix up the EDFN data structure.
+    (SELECTQ (ED-BUFFER-TYPE BUFFER)
+       (FILE (SETQ FILE (ED-BUFFER-PATHNAME BUFFER))
+	     (SETQ ED-FILE-LIST (DELQ FILE ED-FILE-LIST))
+	     (REMPROP BUFFER-NAME 'ED-FILE-BUFFER))
+       (SECTION (REMPROP BUFFER-NAME 'ED-TICK)))
+    
+    (REMPROP BUFFER-NAME 'ED-BUFFER)
+    (AND (SETQ TEM (ASSQ BUFFER-NAME ED-BUFFER-ALIST))
+	 (SETQ ED-BUFFER-ALIST (DELQ TEM ED-BUFFER-ALIST)))
+	  
+    )
+
+(DEFUN ED-COM-REVERT-BUFFER (CHR)
+    (ED-REVERT-BUFFER (ED-GET-BUFFER-BY-NAME "Buffer to revert:"))
+    ED-DIS-BUFFER)
+
+;Kill a buffer and read the function back in again.
+;This takes either a buffer or a buffer name.
+(DEFUN ED-REVERT-BUFFER (BUFFER &AUX NAME PATHNAME TEM)
+    (AND (SYMBOLP BUFFER) (SETQ BUFFER (GET BUFFER 'ED-BUFFER)))
+    (SETQ NAME (ED-BUFFER-NAME BUFFER)
+	  PATHNAME (ED-BUFFER-PATHNAME BUFFER))
+    
+    (SELECTQ (ED-BUFFER-TYPE BUFFER)
+       (FILE (ED-KILL-BUFFER BUFFER)
+	     (ED-READ-IN-FILE TEM NIL NAME))
+       (SECTION (OR (GET BUFFER 'ED-RANGE)
+                    (ED-BARF "Since this is a newly added buffer, it cannot be reverted."))
+                (ED-KILL-BUFFER BUFFER)
+		(ED-SELECT-BUFFER ED-WINDOW
+				  (ED-OPEN-BUFFER
+				   (ED-READ-SECTION-OF-FILE NAME PATHNAME))));-foo-
+       (OTHERWISE (ED-BARF "This buffer is not being used to edit a file."))))
+
+(DEFUN ED-COM-KILL-ALL-BUFFERS (CHR)
+    (AND (ED-CONFIRM "Do you really want to kill all buffers?")
+	 (ED-KILL-ALL-BUFFERS))
+    ED-DIS-SCREEN)
+
+(DEFUN ED-KILL-ALL-BUFFERS ()
+    (MAPC '(LAMBDA (X) (ED-KILL-BUFFER (CDR X))) ED-BUFFER-ALIST))
+
+(DEFUN ED-COM-FORGET-ALL-FILES (CHR)
+    (AND (ED-CONFIRM "Do you really want to forget all files?")
+	 (ED-FORGET-ALL-FILES))
+    ED-DIS-SCREEN)
+
+(DEFUN ED-FORGET-ALL-FILES ()
+    (MAPC 'ED-FORGET-FILE ED-FILE-LIST))
+
+(DEFUN ED-COM-FORGET-FILE (CHR)
+       (ED-FORGET-FILE (INTERN (ED-GET-DEFAULTED-FILE-NAME "File to forget: "))))
+
+;Forget that we read in any functions from the specified file.
+;Takes a file symbol, returns a redisplay code.
+(DEFUN ED-FORGET-FILE (FILE &AUX (OLD-OPEN-BUFFER ED-OPEN-BUFFER) TEM)
+    (COND ((SETQ TEM (GET FILE 'ED-FILE-BUFFER))
+	   (REMPROP FILE 'ED-FILE-BUFFER)
+	   (ED-KILL-BUFFER TEM))
+	  ((SETQ TEM (GET FILE 'ED-FILE-SECTION-LIST))
+	   (MAPC '(LAMBDA (X)
+			  (REMPROP X 'ED-FILE)
+			  (REMPROP X 'ED-RANGE)
+			  (REMPROP X 'ED-TICK)
+			  (COND ((SETQ TEM (GET X 'ED-BUFFER))
+				 (ED-KILL-BUFFER TEM))))
+		 TEM)
+	   (REMPROP FILE 'ED-FILE-SECTION-LIST)
+	   (REMPROP FILE 'ED-HEAD-EVALLED))
+	  (T (ED-BARF "I have never heard of the file " FILE)))
+    (SETQ ED-FILE-LIST (DELQ FILE ED-FILE-LIST))
+    (REMPROP FILE 'ED-FILE-ID)
+    (COND ((EQ OLD-OPEN-BUFFER ED-OPEN-BUFFER) ED-DIS-NONE)
+	  (T ED-DIS-BUFFER)))
+
+(DEFUN ED-BUFFER-MUNGED-P (BUFFER &AUX TICK)
+    (AND (SYMBOLP BUFFER) (SETQ BUFFER (GET BUFFER 'ED-BUFFER)))
+    (COND ((NULL BUFFER) NIL)
+          ((NULL (SETQ TICK (GET (ED-BUFFER-NAME BUFFER) 'ED-TICK))) T)
+          ((< TICK (ED-BUFFER-MUNGED BUFFER)))))
+
+;Does any function in the specified file need to be updated to the PDP10?
+(DEFUN ED-FILE-MUNGED-P (FILE &AUX TEM)
+    (COND ((SETQ TEM (GET FILE 'ED-FILE-SECTION-LIST))
+	   (SOME TEM 'ED-BUFFER-MUNGED-P))
+	  ((SETQ TEM (GET FILE 'ED-FILE-BUFFER))
+	   (ED-BUFFER-MUNGED-P TEM))
+	  (T (ED-BARF "I have never heard of the file " FILE))))
+
+;Does EVERY function in the specified file need to be updated to the PDP10?
+(DEFUN ED-FILE-TOTALLY-MUNGED-P (FILE &AUX TEM)
+    (COND ((SETQ TEM (GET FILE 'ED-FILE-SECTION-LIST))
+	   (EVERY TEM 'ED-BUFFER-MUNGED-P))
+	  ((SETQ TEM (GET FILE 'ED-FILE-BUFFER))
+	   (ED-BUFFER-MUNGED-P TEM))
+	  (T (ED-BARF "I have never heard of the file " FILE))))
+
+;;; UPDATING FILES
+
+(DEFUN ED-COM-UPDATE-FILE (CHR)
+    (ED-UPDATE-FILE (INTERN (ED-GET-DEFAULTED-FILE-NAME "File to update: ")))
+    ED-DIS-NONE)
+
+;; Takes a file symbol.
+(DEFUN ED-UPDATE-FILE (FILE &AUX BUFFER)
+    (ED-VERIFY-FILE FILE)
+    (COND ((ED-FILE-MUNGED-P FILE)
+	   (COND ((SETQ BUFFER (GET FILE 'ED-FILE-BUFFER))
+		  (ED-WRITE-TO-FILE FILE BUFFER))
+		 ((GET FILE 'ED-FILE-SECTION-LIST)
+		  (ED-UPDATE-SECTION-FILE FILE))
+		 (T (ED-BARF "I have never heard of the file " (GET-PNAME FILE)))))
+	  (T
+	   (FORMAT-STRING STANDARD-OUTPUT
+			  "There is nothing to update in file ~A~%"
+			  (GET-PNAME FILE))))
+    )
+
+(DEFUN ED-UPDATE-SECTION-FILE (FILE &AUX STREAM (ED-OUTPOS 0) START SIZE TEM)
+    (FILE-COMMAND-CAREFUL "MAPRD " (GET-PNAME FILE))
+    (SETQ STREAM (OPEN (GET-PNAME FILE) '(WRITE)))
+
+    (DO ((LIST (GET FILE 'ED-FILE-SECTION-LIST)))
+	((NULL LIST))
+
+      ;; Identify a region which has not changed, and write it out.
+      (SETQ START (FIRST (GET (CAR LIST) 'ED-RANGE)))
+      (SETQ SIZE
+	    (DO ((L LIST (CDR L))
+		 (SIZE 0)
+		 (RANGE))
+		((OR (NULL L)
+		     (AND (SETQ TEM (GET (CAR L) 'ED-BUFFER))
+			  (ED-BUFFER-MUNGED-P TEM))
+		     (NOT (= (FIRST (SETQ RANGE (GET (CAR L) 'ED-RANGE)))
+			     (+ START SIZE))))
+		 (SETQ LIST L)
+		 SIZE)
+	      
+	      (PUTPROP (CAR L)
+		       (LIST ED-OUTPOS (SECOND RANGE))
+		       'ED-NEW-RANGE)
+	      (SETQ ED-OUTPOS (+ ED-OUTPOS (SECOND RANGE)))
+	      (SETQ SIZE (+ SIZE (SECOND RANGE)))))
+      (ED-MAPOUT START SIZE)
+
+      (DO ((L LIST (CDR L)))
+	  ((OR (NULL L)
+	       (NOT (AND (SETQ TEM (GET (CAR L) 'ED-BUFFER))
+			 (ED-BUFFER-MUNGED-P TEM))))
+	   (SETQ LIST L))
+	(ED-WRITE-BACK-BUFFER (CAR L) STREAM))
+      );END DO
+
+      (CLOSE STREAM)
+
+      ;; Now read the new file's file-id (must wait till now since now size is known)
+      (PUTPROP FILE (STRING-APPEND (FILE-COMMAND "OUTINFO")) 'ED-FILE-ID)
+      (DO ((LIST (GET FILE 'ED-FILE-SECTION-LIST) (CDR LIST))
+	   (SECTION))
+	  ((NULL LIST))
+	(SETQ SECTION (CAR LIST))
+	(PUTPROP SECTION (GET SECTION 'ED-NEW-RANGE) 'ED-RANGE)
+	(REMPROP SECTION 'ED-NEW-RANGE)
+	(AND (GET SECTION 'ED-BUFFER) (PUTPROP SECTION ED-TICK 'ED-TICK)))
+      (FILE-COMMAND "MAPFLS")
+      (ED-ECHO-MESSAGE "Written: ~A" (FILE-COMMAND "OUTRFN"))
+      (SETQ ED-TICK (1+ ED-TICK)))
+
+;Given a FILE-ID "version date time size", extract the size, and convert to a number.
+;(DEFUN ED-FILE-ID-EXTRACT-SIZE (ID &AUX POS (IBASE 10.))
+;       (SETQ POS (STRING-SEARCH " " ID))
+;       (SETQ POS (STRING-SEARCH " " ID (1+ POS)))
+;       (SETQ POS (STRING-SEARCH " " ID (1+ POS)))
+;       (READ-FROM-STRING (NSUBSTRING ID (1+ POS) (STRING-LENGTH ID))))
+
+;Write the range <start> - <end> of the mapped file to the output file.
+(DEFUN ED-MAPOUT (START SIZE)
+      (OR (ZEROP SIZE)
+	  (FILE-COMMAND-CAREFUL "MAPOUT "
+			(FORMAT-STRING NIL "~D ~D" START SIZE))))
+
+; This is a sub-function of ED-UPDATE-SECTION-FILE.
+; Write out the contents of the buffer to the stream, updating ED-OUTPOS
+;  and setting up the ED-NEW-RANGE property.
+(DEFUN ED-WRITE-BACK-BUFFER (BUFFER-NAME STREAM 
+					 &AUX (IBASE 10.) ED-OPEN-BUFFER TEM-BP NEWBEG)
+    (SETQ ED-OPEN-BUFFER (GET BUFFER-NAME 'ED-BUFFER))
+    (SETQ TEM-BP (ED-COPY-BP (ED-BUFFER-POINT) 'TEMP))
+    (FUNCALL (ED-BUFFER-STREAM) 'INITIALIZE)
+    (SETQ NEWBEG ED-OUTPOS)
+    (STREAM-COPY-UNTIL-EOF (ED-BUFFER-STREAM) STREAM)	   
+    (FUNCALL STREAM 'FINISH)
+    (SETQ ED-OUTPOS (FUNCALL STREAM 'READ-POINTER))
+    (PUTPROP BUFFER-NAME
+	     (LIST NEWBEG (- ED-OUTPOS NEWBEG))
+	     'ED-NEW-RANGE)
+    (ED-MOVE-POINT TEM-BP))
+
+(DEFUN ED-COM-UPDATE-ALL-FILES (CHR &AUX FILE-SYMBOL FLAG)
+    (TV-ACTIVATE-PC-PPR ED-DISPLAY-PC-PPR)
+    (TV-HOME ED-DISPLAY-PC-PPR)
+    (DO L ED-FILE-LIST (CDR L) (NULL L)
+      (SETQ FILE-SYMBOL (CAR L))
+      (COND ((ED-FILE-MUNGED-P FILE-SYMBOL)
+	     (SETQ FLAG T)
+	     (TV-CLEAR-EOL ED-DISPLAY-PC-PPR)
+	     (FORMAT-STRING ED-DISPLAY-STREAM "Update file ~A ? " (GET-PNAME FILE-SYMBOL))
+	     (COND ((YES-OR-NO-P)
+		    (FORMAT-STRING ED-DISPLAY-STREAM "Yes.~%")
+		    (ED-UPDATE-FILE FILE-SYMBOL))
+		   (T (FORMAT-STRING ED-DISPLAY-STREAM "No.~%"))))))
+    (COND (FLAG (FORMAT-STRING ED-DISPLAY-STREAM "Done.~%"))
+	  (T (FORMAT-STRING ED-DISPLAY-STREAM "No files need updating.~%")))
+    (TV-DEACTIVATE-PC-PPR ED-DISPLAY-PC-PPR)
+    (SETQ ED-SPECIAL-SCREEN-P T)
+    ED-DIS-NONE)
+
+;;; Read in the entire contents of a file, splitting it into buffers.
+;;; Of course, those regions which were already read in are not read in again,
+;;; to avoid clobbering any changes.
+
+(DEFUN ED-COM-LOAD-WHOLE-FILE (CHR)
+       (ED-LOAD-WHOLE-FILE (INTERN (ED-GET-DEFAULTED-FILE-NAME "File to load: ")))
+       ED-DIS-BUFFER)
+
+(DEFUN ED-LOAD-WHOLE-FILE (FILE &AUX TEM STREAM SECTION RANGE)
+    (ED-ASSURE-FILE-SCANNED FILE)
+    (ED-VERIFY-FILE FILE)
+ 
+    (SETQ STREAM (FILE-MAPPED-OPEN (GET-PNAME FILE)))
+
+    (DO LIST (GET FILE 'ED-FILE-SECTION-LIST) (CDR LIST) (NULL LIST)
+      (SETQ SECTION (CAR LIST))
+      ;; IF YOU CHANGE THIS hack ED-READ-SECTION similarly.
+      (COND ((NULL (GET SECTION 'ED-BUFFER))
+	     (SETQ RANGE (GET SECTION 'ED-RANGE))
+	     (FILE-COMMAND (FORMAT-STRING NIL "MAPSET ~D ~D" (FIRST RANGE) (SECOND RANGE)))
+	     (SETQ ED-OPEN-BUFFER (ED-READ-IN-BUFFER STREAM SECTION))
+	     (PUTPROP SECTION (ED-TICK) 'ED-TICK)
+	     (SETF (ED-BUFFER-TYPE) 'SECTION)
+	     (SETF (ED-BUFFER-PATHNAME) FILE)
+	     )))
+    (ED-SET-DEFAULT-FILE-NAME (STRING FILE))
+    (ED-SELECT-BUFFER ED-WINDOW (ED-OPEN-BUFFER ED-OPEN-BUFFER))
+    (FILE-COMMAND "MAPFLS")
+    )

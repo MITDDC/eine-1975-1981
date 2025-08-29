@@ -1,0 +1,16 @@
+(DEFUN ED-COM-REORDER-SECTIONS (CHR)
+    (ED-REORDER-SECTIONS (ED-GET-DEFAULTED-FILE-NAME "Reorder sections of which file?"))
+    ED-DIS-SCREEN)
+
+(DEFUN ED-REORDER-SECTIONS (FILE &AUX SECS BP)
+    (AND (STRINGP FILE) (SETQ FILE (INTERN FILE)))
+    (OR (SETQ SECS (GET FILE 'ED-FILE-SECTION-LIST))
+        (ED-BARF (STRING FILE) " is not a known section file."))
+    (LET ((ED-OPEN-BUFFER (ED-CREATE-BUFFER NIL (+ 20 (LENGTH SECS)))))
+         (SETQ BP (ED-BUFFER-POINT BUF))
+         (DO ((SECS SECS (CDR SECS)))
+             ((NULL SECS))
+           (ED-INSERT-CHARS BP (GET-PNAME (CAR SECS)))
+           (ED-INSERT-CRS BP 1))
+         (ED-BIND-MODE-LINE (GET-PNAME FILE) '("Reorder sections of " ED-RANDOM-MODE)
+            (

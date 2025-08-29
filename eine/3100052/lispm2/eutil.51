@@ -1,0 +1,418 @@
+;;; This file is part of EINE, the Lisp Machine editor.        -*-LISP-*-
+;;; For more information see LISPM2;EINE INFO.
+
+;; This file contains functions for general utility.  They are basic tools
+;;    used all over the editor.
+
+(DECLARE (SETQ RETAIN-VARIABLE-NAMES-SWITCH 'ARGS))
+(DECLARE (SETQ OPEN-CODE-MAP-SWITCH T))
+
+; Remove the next two lines after another cold-load is made, this stuff is in QCOM.
+(DECLARE (SPECIAL %%KBD-CHAR %%KBD-CONTROL %%KBD-META %%KBD-CONTROL-META))
+(SETQ %%KBD-CHAR 0010 %%KBD-CONTROL 1001 %%KBD-META 1101 %%KBD-CONTROL-META 1002)
+
+(DEFUN ED-BP-CHAR-SET (BP CHAR &AUX LINE CHAR-POS)
+    (SETQ LINE (ED-BP-LINE BP))
+    (SETQ CHAR-POS (ED-BP-CHAR-POS BP))
+    (COND ((< CHAR-POS (ARRAY-ACTIVE-LENGTH LINE))
+	   (AS-1 CHAR LINE CHAR-POS))
+	  (T
+	   (OR (ED-DELETE-CHARS BP 1) (ED-BARF))
+	   (ED-INSERT-CHARS BP CHAR))))
+
+(DEFUN ED-BP-SET (TO FROM)
+       (SETF (ED-BP-CHAR-POS TO) (ED-BP-CHAR-POS FROM))
+       (SETF (ED-BP-LINE TO) (ED-BP-LINE FROM)))
+
+; Is this BP at the beginning of the open buffer?
+(DEFUN ED-BOB-P (BP)
+    (AND (= (ED-BP-LINE BP) (AR-1 (ED-LINE-BUFFER (ED-BP-LINE BP)) 0))
+	 (= (ED-BP-CHAR-POS BP) 0)))
+
+; Is this BP at the end of the open buffer?
+(DEFUN ED-EOB-P (BP &AUX LINE (BUFFER (ED-LINE-BUFFER (ED-BP-LINE BP))))
+   (SETQ LINE (AR-1 BUFFER (1- (ED-BUFFER-FILL-POINTER BUFFER))))
+   (AND (= (ED-BP-LINE BP) LINE)
+	(= (ED-BP-CHAR-POS BP) (ED-LINE-FILL-POINTER LINE))))
+
+; Copy an existing BP.
+(DEFUN ED-COPY-BP (BP &OPTIONAL (STATUS (ED-BP-STATUS BP)))
+    (ED-BP (ED-BP-CHAR-POS BP) (ED-BP-LINE BP) STATUS))
+
+; The "null function", to use to disable a PC-PPR function .
+(DEFUN ED-TRUE () T)
+
+;Given a question, in the form of a string, ask it and return T if user answers YES.
+(DEFUN ED-ASK-QUESTION (STRING)
+    (TV-ACTIVATE-PC-PPR ED-ECHO-PC-PPR)
+    (TV-SET-CURSORPOS ED-ECHO-PC-PPR 0 0)
+    (TV-CLEAR-EOL ED-ECHO-PC-PPR)
+    (PRINC STRING ED-ECHO-STREAM)
+    (PROG1 (YES-OR-NO-P ED-ECHO-STREAM)
+	   (TV-DEACTIVATE-PC-PPR ED-ECHO-PC-PPR)))
+
+;Given a buffer, return the package that its contents should be interned in.
+(DEFUN ED-BUFFER-PACKAGE (BUFFER &AUX BNAME PACKAGE)
+    (SETQ BNAME (ED-BUFFER-NAME))
+    (OR (SETQ PACKAGE (GET BNAME 'ED-BUFFER-PACKAGE))
+	(AND (ED-BUFFER-PATHNAME)
+	     (SETQ PACKAGE (GET (ED-BUFFER-PATHNAME) 'ED-FILE-PACKAGE))))
+    (OR PACKAGE CURRENT-PACKAGE))
+
+;Given an editor buffer, return the tick at which it was last modified.
+(DEFUN ED-BUFFER-MUNGED (BUFFER &AUX (LATEST 0))
+       ;; Take the MAX over all lines in the buffer
+       ;; of the line's ED-LINE-MUNGED.
+       (DO ((LEN (ED-BUFFER-FILL-POINTER BUFFER))
+	    (LINE-TICK)
+	    (I 0 (1+ I)))
+	   ((= I LEN))
+	   (SETQ LINE-TICK (ED-LINE-MUNGED (AR-1 BUFFER I)))
+	   (OR (> LATEST LINE-TICK)
+	       (SETQ LATEST LINE-TICK)))
+       LATEST)
+
+;Print a list of strings, separated by commas, on the given or default stream.
+(DEFUN ED-PRINT-LIST-WITH-COMMAS (LIST &OPTIONAL (STREAM
+						  STANDARD-OUTPUT))
+       (DO ((LIST LIST (CDR LIST))
+            (FIRST T NIL))
+           ((NULL LIST))
+           (OR FIRST (PRINC ", " STREAM))
+           (PRINC (CAR LIST) STREAM)))
+
+;Random useful functions.
+
+; ED-LINE-COPY returns a new line which is a copy of the first arg, a line.
+;    It is suitable for insertion in any buffer; no BPs are copied, etc.
+; ED-EXPAND-LINE is used to copy the line AND put it back where it came from
+;   in the open buffer, fixing up all the data structures.
+; Each of these take two optional arguments, which are the length and array type
+;   of the new line.  The defaults are to leave them the same.
+
+; This just makes a copy and leaves the original alone.
+(DEFUN ED-LINE-COPY (LINE &OPTIONAL LINE-LENGTH ARRAYTYPE &AUX NEW-LINE)
+       (SETQ NEW-LINE
+	     (ED-CREATE-LINE (OR ARRAYTYPE (ARRAY-TYPE LINE))
+			     (OR LINE-LENGTH (MAX 100 (ED-LINE-FILL-POINTER LINE)))))
+       (COPY-ARRAY-CONTENTS LINE NEW-LINE)
+       (SETF (ED-LINE-FILL-POINTER NEW-LINE) (ED-LINE-FILL-POINTER LINE))
+       NEW-LINE)
+
+; This takes a line, and replaces it (using invisible pointers) with a
+;   new line with the given new parameters.
+(DEFUN ED-EXPAND-LINE (LINE LINE-LENGTH &OPTIONAL (ARRAYTYPE (ARRAY-TYPE LINE))
+			    &AUX NEW-LINE)
+    (OR LINE-LENGTH					;Useful for changing array type only
+	(SETQ LINE-LENGTH (ARRAY-LENGTH LINE)))	;   when doing font hacking.
+    (SETQ NEW-LINE (ED-CREATE-LINE ARRAYTYPE LINE-LENGTH))
+    (COPY-ARRAY-CONTENTS-AND-LEADER LINE NEW-LINE)
+    (%P-STORE-TAG-AND-POINTER LINE DTP-FORWARD NEW-LINE)
+    LINE)
+
+(DEFUN ED-ASSURE-ROOM-IN-LINE (LINE ROOM &AUX SIZE)
+       (SETQ SIZE (ARRAY-DIMENSION-N 1 LINE))
+       (COND ((< SIZE (+ ROOM (STRING-LENGTH LINE)))
+	      (ED-EXPAND-LINE LINE (+ SIZE (MAX ROOM 100.))))
+	     (T LINE)))
+
+; Random string hacking functions.  These should all support single-fixnum "strings."
+
+(COMMENT RANDOM STRING FUNCTIONS)
+
+(DEFUN ED-STRING-MEMQ (CHAR STRING &OPTIONAL (FROM 0) &AUX LENGTH)
+       (COND ((NUMBERP STRING)
+	      (COND ((> FROM 0) NIL)
+	            ((CHAR-EQUAL CHAR STRING) 0)
+		    (T NIL)))
+	     (T 
+	      (SETQ LENGTH (STRING-LENGTH STRING))
+	      (DO ((I FROM (1+ I)))
+		  ((>= I LENGTH) NIL)
+		  (AND (CHAR-EQUAL CHAR (AR-1 STRING I))
+		       (RETURN I))))))
+
+;NOTE THAT THIS EXPANDS TO THE LINE TO 16 BIT CHARACTERS IF NECESSARY
+(DEFUN ED-FILL-LINE (TO FROM &AUX LENGTH 16BIT-P CH)
+   (SETQ 16BIT-P (EQ (ARRAY-TYPE TO) 'ART-16B))
+   (ED-MUNG TO)
+   (COND ((NUMBERP FROM)
+	  (SETQ TO (ED-ASSURE-ROOM-IN-LINE TO 1))
+	  (AND (>= FROM 400)
+	       (NOT 16BIT-P)
+	       (SETQ 16BIT-P T TO (ED-EXPAND-LINE TO NIL 'ART-16B)))
+	  (ARRAY-PUSH TO FROM)
+	  TO)
+	 (T (SETQ LENGTH (STRING-LENGTH FROM))
+	    (SETQ TO (ED-ASSURE-ROOM-IN-LINE TO LENGTH))
+	    (DO I 0 (1+ I) (>= I LENGTH)
+		(AND (>= (SETQ CH (AR-1 FROM I)) 400)
+		     (NOT 16BIT-P)
+		     (SETQ 16BIT-P T TO (ED-EXPAND-LINE TO NIL 'ART-16B)))
+		(ARRAY-PUSH TO CH))
+	    TO)))
+
+(DEFUN ED-COUNT-CHARS (CHAR STRING)
+   (COND ((NUMBERP STRING) (COND ((CHAR-EQUAL CHAR STRING) 1)
+				 (T 0)))
+	 (T (DO ((I 0 (1+ I))
+		 (N 0)
+		 (LENGTH (STRING-LENGTH STRING)))
+		((>= I LENGTH) N)
+	      (AND (CHAR-EQUAL (AR-1 STRING I) CHAR) (SETQ N (1+ N)))))))
+
+
+(COMMENT RANDOM FUNCTIONS)
+
+(DEFUN EVAL-PRINT (OBJECT &OPTIONAL (STREAM STANDARD-OUTPUT)
+			  &AUX LIST)			;RETURNS WHAT TO SET * TO.
+    (PROG NIL
+       (SETQ LIST (MULTIPLE-VALUE-LIST (EVAL OBJECT)))
+       (DO VALL LIST
+	   (CDR VALL)
+	   (NULL VALL)
+	   (PRINT (CAR VALL)))
+       (RETURN (CAR LIST) OBJECT)))
+
+(DEFUN ED-BP-CHAR (BP)
+   (COND ((= (ED-BP-CHAR-POS BP) (STRING-LENGTH (ED-BP-LINE BP)))
+	  215)
+	 (T
+	  (AR-1 (ED-BP-LINE BP) (ED-BP-CHAR-POS BP)))))
+
+(DEFUN ED-BP-CHAR-BEFORE (BP)
+   (COND ((ZEROP (ED-BP-CHAR-POS BP))
+	  215)
+	 (T
+	  (AR-1 (ED-BP-LINE BP) (1- (ED-BP-CHAR-POS BP))))))
+
+(DEFUN ED-IBP (BP &AUX LINE-NUM)			;INCREMENT BUFFER POINTER
+    (COND ((ED-BP-EQUAL BP ED-IBP-LIMIT-BP)
+	   (*THROW 'ED-EOB NIL))
+	  ((>= (ED-BP-CHAR-POS BP)			;THROWS TO ED-EOB ON EOB ERROR
+	       (STRING-LENGTH (ED-BP-LINE BP)))
+	   (SETQ LINE-NUM (ED-LINE-NUMBER (ED-BP-LINE BP)))
+	   (AND (>= (SETQ LINE-NUM (1+ LINE-NUM))
+		    (ED-BUFFER-FILL-POINTER ED-OPEN-BUFFER))
+		(*THROW 'ED-EOB NIL))
+	   (SETF (ED-BP-CHAR-POS BP) 0)
+	   (SETF (ED-BP-LINE BP) (AR-1 ED-OPEN-BUFFER LINE-NUM)))
+	  (T
+	   (SETF (ED-BP-CHAR-POS BP) (1+ (ED-BP-CHAR-POS BP)))))
+    BP)
+
+(DEFUN ED-DBP (BP &AUX LINE-NUM)			;DECREMENT BUFFER POINTER
+    (COND ((ED-BP-EQUAL BP ED-DBP-LIMIT-BP)
+	   (*THROW 'ED-BOB NIL))
+	  ((<= (ED-BP-CHAR-POS BP) 0)			;THROWS TO ED-BOB ON EOB ERROR
+	   (SETQ LINE-NUM (ED-LINE-NUMBER (ED-BP-LINE BP)))
+	   (AND (ZEROP LINE-NUM)
+		(*THROW 'ED-BOB NIL))
+	   (SETF (ED-BP-LINE BP) (AR-1 ED-OPEN-BUFFER (1- LINE-NUM)))
+	   (SETF (ED-BP-CHAR-POS BP) (STRING-LENGTH (ED-BP-LINE BP))))
+	  (T
+	   (SETF (ED-BP-CHAR-POS BP) (1- (ED-BP-CHAR-POS BP)))))
+    BP)
+
+; The following macros exist in the EDD file:
+; ED-ILDB, ED-DLDB
+
+
+(DEFUN ED-ORDER-BPS (BP1 BP2)
+   (PROG NIL
+	 (COND ((ED-BP-< BP1 BP2)
+		(RETURN BP1 BP2))
+	       (T
+		(RETURN BP2 BP1)))))
+
+;TAKES TWO BPS, AND RETURNS T IF THE FIRST IS PREVIOUS TO THE SECOND IN THE BUFFER
+(DEFUN ED-BP-< (BP1 BP2 &AUX TEM1 TEM2)
+    (SETQ TEM1 (ED-BP-LINE-NUM BP1)
+	  TEM2 (ED-BP-LINE-NUM BP2))
+    (COND ((< TEM1 TEM2) T)
+	  ((> TEM1 TEM2) NIL)
+	  (T
+	   (< (ED-BP-CHAR-POS BP1) (ED-BP-CHAR-POS BP2)))))
+
+(DEFUN ED-BP-EQUAL (BP1 BP2)
+    (AND (EQ (ED-BP-LINE BP1) (ED-BP-LINE BP2))
+	 (= (ED-BP-CHAR-POS BP1) (ED-BP-CHAR-POS BP2))))
+
+(DEFUN ED-POINT-PDL-PUSH (BP)
+    (SETF (ED-BUFFER-POINT-PDL) (CONS (ED-COPY-BP BP 'NORMAL) (ED-BUFFER-POINT-PDL)))
+    (AND (> (LENGTH (ED-BUFFER-POINT-PDL)) ED-POINT-PDL-MAX-LENGTH)
+	 (ED-DELETE-LAST-ELEMENT (ED-BUFFER-POINT-PDL))))
+
+(DEFUN ED-POINT-PDL-POP NIL
+   (COND ((NULL (ED-BUFFER-POINT-PDL))
+	  (ED-BARF))
+	 (T
+	  (PROG1 (CAR (ED-BUFFER-POINT-PDL))
+		 (SETF (ED-BUFFER-POINT-PDL)
+		       (NCONC (CDR (ED-BUFFER-POINT-PDL))
+			      (RPLACD (ED-BUFFER-POINT-PDL) NIL)))))))
+
+(DEFUN ED-SEARCH-RING-PUSH (STRING)
+    (COND ((AND ED-SEARCH-RING (NUMBERP (CAR ED-SEARCH-RING)))
+	   (RPLACA ED-SEARCH-RING STRING))
+	  (T
+	   (SETQ ED-SEARCH-RING (CONS STRING ED-SEARCH-RING))
+	   (AND (> (LENGTH ED-SEARCH-RING) ED-SEARCH-RING-MAX-LENGTH)
+		(ED-DELETE-LAST-ELEMENT ED-SEARCH-RING)))))
+
+(DEFUN ED-SEARCH-RING-POP ()
+    (COND ((NULL ED-SEARCH-RING)
+	   (ED-BARF))
+	  (T
+	   (PROG1 (CAR ED-SEARCH-RING)
+		  (SETQ ED-SEARCH-RING
+			(NCONC (CDR ED-SEARCH-RING)
+			       (RPLACD ED-SEARCH-RING NIL)))))))
+
+(DEFUN ED-KILL-RING-PUSH (THING)
+    (SETQ ED-KILL-RING (CONS THING ED-KILL-RING))
+    (AND (> (LENGTH ED-KILL-RING) ED-KILL-RING-MAX-LENGTH)
+	 (ED-DELETE-LAST-ELEMENT ED-KILL-RING)))
+
+(DEFUN ED-KILL-RING-POP ()
+    (COND ((NULL ED-KILL-RING)
+	   (ED-BARF))
+	  (T
+	   (PROG1 (CAR ED-KILL-RING)
+		  (SETQ ED-KILL-RING
+			(NCONC (CDR ED-KILL-RING)
+			       (RPLACD ED-KILL-RING NIL)))))))
+
+(DEFUN ED-DELETE-LAST-ELEMENT (LIST)
+    (AND (> (LENGTH LIST) 1)				;PREVENT LOSSAGE
+	 (DO ((L LIST (CDR L)))
+	     ((NULL (CDDR L))
+	      (RPLACD L NIL)))))
+
+(DEFUN ED-RESET-TEMP-AREA ( &AUX FREEP AREAP)
+    (COND (ED-RESET-TEMP-AREA-P
+	   (SETQ FREEP (AR-1 (FSYMEVAL 'AREA-FREE-POINTER) ED-TEMP-AREA))
+	   (SETQ AREAP (%P-CONTENTS-AS-LOCATIVE
+			(AP-1 (FSYMEVAL 'AREA-ORIGIN) ED-TEMP-AREA)))
+	   (DO I (1- FREEP) (1- I) (< I 0)
+	       (%P-DPB-OFFSET DTP-FREE %%Q-DATA-TYPE AREAP I))
+	   (AS-1 0 (FSYMEVAL 'AREA-FREE-POINTER) ED-TEMP-AREA))))
+
+(DEFUN ED-COM-ENTER-TEMP-AREA (CHR)
+    (OR (BOUNDP 'ED-TEMPORARY-AREA)
+        (DEFINE-AREA 'ED-TEMPORARY-AREA 100000))
+    (SETQ ED-TEMP-AREA ED-TEMPORARY-AREA)
+    (SETQ ED-RESET-TEMP-AREA-P T)
+    ED-DIS-NONE)
+
+(DEFUN ED-COM-EXIT-TEMP-AREA (CHR)
+    (SETQ ED-TEMP-AREA DEFAULT-ARRAY-AREA)
+    (SETQ ED-RESET-TEMP-AREA-P NIL)
+    ED-DIS-NONE)
+
+; Go to the echo area and use COMPLETING-READ to get a buffer name.
+; If he quits or gives a non-existent one, ED-BARF.  Else return the buffer
+; (not the name, the buffer itself).
+(DEFUN ED-GET-BUFFER-BY-NAME (PROMPT &AUX TEM)
+    (SETQ TEM (ED-COMPLETING-READ-PROMPT PROMPT ED-BUFFER-MODE-LIST ED-BUFFER-ALIST
+					 ED-COMMAND-STREAM NIL T))
+    (COND ((MEMQ TEM '(0 NIL))
+	   (ED-BARF))
+	  (T (CDR TEM))))
+
+; Wait for the user to type something.  If it is a space, gobble it, otherwise
+;   UNTYI it back.  Returns T if he typed a space, else NIL.
+(DEFUN ED-WAIT-FOR-SPACE ( &AUX CHAR)
+    (SETQ CHAR (FUNCALL ED-COMMAND-STREAM 'TYI))
+    (OR (= CHAR 40)
+	(FUNCALL ED-COMMAND-STREAM 'UNTYI CHAR))
+    (= CHAR 40))
+
+; Given a string, and an (optional) index into that string (defaults to 0),
+;   interprets it as the text representation of keyboard input, and returns
+;   the corresponding fixnum which KBD-TYI would have returned.  It returns
+;   as a second value the index of the first char AFTER the ones it looked
+;   at.  See LMDOC; CHAR >.
+(DEFUN ED-STRING-KBD-CHAR (STRING &OPTIONAL (I 0) &AUX CHAR TEM)
+  (PROG ()
+    (SETQ CHAR (AR-1 STRING I) I (1+ I))
+    (COND ((SETQ TEM (ASSOC CHAR '((2 . 400) (3 . 1000) (6 . 1400) (36 . 0))))
+	   (RETURN (+ (CDR TEM) (AR-1 STRING I)) (1+ I)))
+	  (T (RETURN CHAR I)))))
+
+; Given a keyboard input fixnum (as is returned by KBD-TYI), return its
+;    string representation.
+(DEFUN ED-KBD-CHAR-STRING (CHAR)
+    (MAKE-STRING 
+     (DISPATCH %%KBD-CONTROL-META CHAR
+	       (0 (COND ((MEMQ CHAR '(2 3 6 36)) (LIST 36 CHAR))
+			(T (LIST CHAR))))
+	       (1 (LIST 2 CHAR))
+	       (2 (LIST 3 CHAR))
+	       (3 (LIST 6 CHAR)))))
+
+; Interpret X as a KBD CHAR, whatever X is.
+(DEFUN ED-GET-KBD-CHAR (X)
+    (COND ((STRINGP X) (ED-STRING-KBD-CHAR X))
+	  ((FIXP X) X)
+	  ((SYMBOLP X) (ED-STRING-KBD-CHAR (GET-PNAME X)))
+	  (T (ERROR " cannot be interpreted as a keyboard character." X))))
+
+; Redefine a bunch of keys on a given editor command table.
+; The first arg is the table; NIL means the main editor command dispatch table.
+; The rest of the args are taken in pairs of <which char to change>, <name of new
+; function>.  The char can be specified by a fixnum, string, or symbol (print name
+; is used).  It returns a thing to which it can later be applied in order to undo
+; what it has done.
+(DEFUN ED-REDEFINE-KEYS (TABLE &REST RLIST)
+    (OR TABLE (SETQ TABLE ED-COMMAND-DISPATCH-TABLE))
+    (OR (AND (ARRAYP TABLE) (= (ARRAY-/#-DIMS TABLE) 2))
+	(ERROR " is not an editor command table." TABLE))
+    (DO ((L RLIST (CDDR L))
+	 (CHAR)
+	 (RET NIL))
+	((NULL L) (CONS 'ED-REDEFINE-KEYS (CONS `',TABLE RET)))
+      (SETQ CHAR (ED-GET-KBD-CHAR (CAR L)))
+      (SETQ RET (CONS `',(CAR L)
+		      (CONS `',(AR-2 TABLE
+				     (LDB %%KBD-CONTROL-META CHAR)
+				     (LDB %%KBD-CHAR CHAR))
+			    RET)))
+      (AS-2 (CADR L) TABLE (LDB %%KBD-CONTROL-META CHAR) (LDB %%KBD-CHAR CHAR))))
+
+; Ask a question and get a YES-OR-NO answer.
+(DEFUN ED-CONFIRM (PROMPT &AUX RET)
+    (TV-SET-CURSORPOS ED-ECHO-PC-PPR 0 0)
+    (TV-CLEAR-EOL ED-ECHO-PC-PPR)
+    (TV-STRING-OUT ED-ECHO-PC-PPR PROMPT)
+    (TV-ACTIVATE-PC-PPR ED-ECHO-PC-PPR)
+    (SETQ RET (YES-OR-NO-P))
+    (TV-DEACTIVATE-PC-PPR ED-ECHO-PC-PPR)
+    RET)
+
+(DEFUN ED-SET-UP-ECHO-AREA (&OPTIONAL STRING)
+    (TV-ACTIVATE-PC-PPR ED-ECHO-PC-PPR)
+    (TV-SET-CURSORPOS ED-ECHO-PC-PPR 0 0)
+    (TV-CLEAR-EOL ED-ECHO-PC-PPR)
+    (AND STRING (TV-STRING-OUT ED-ECHO-PC-PPR STRING)))
+
+(DEFUN ED-SET-DOWN-ECHO-AREA ()
+    (TV-DEACTIVATE-PC-PPR ED-ECHO-PC-PPR))
+
+(DEFUN ED-ECHO-MESSAGE (&REST ARGS)
+    (TV-SET-CURSORPOS ED-ECHO-PC-PPR 0 0)
+    (TV-CLEAR-EOL ED-ECHO-PC-PPR)
+    (APPLY 'FORMAT-STRING (CONS ED-ECHO-STREAM ARGS)))
+
+; NAME = NIL to gensym a name, T for no name at all.
+
+(DEFUN ED-BUFFER-COPY (BUFFER &OPTIONAL NAME
+			      &AUX (LEN (ED-BUFFER-FILL-POINTER BUFFER)))
+    (LET ((ED-OPEN-BUFFER (ED-CREATE-BUFFER NAME LEN)))
+	 (DO ((I 0 (1+ I)))
+	     ((>= I LEN))
+	   (ED-INSERT-LINE-INTO-OPEN-BUFFER
+	    (ED-LINE-COPY (AR-1 BUFFER I))
+	    I))
+	 (SETF (ED-BUFFER-FILL-POINTER) LEN)
+	 ED-OPEN-BUFFER))

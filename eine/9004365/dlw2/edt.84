@@ -1,0 +1,189 @@
+;;; -*-LISP-*-
+; This is the "editor top level" package.
+
+(DECLARE (SETQ RETAIN-VARIABLE-NAMES-SWITCH 'ARGS))
+(DECLARE (SETQ OPEN-CODE-MAP-SWITCH T))
+
+
+(SETQ EDT '( (SET-PROCESS-SWITCH RETAIN-VARIABLE-NAMES-SWITCH 'ARGS)
+
+	     EDT EDT-SETUP EDT-TOP-LEVEL EDT-COM-ACTIVATE EDT-COM-INTERIM-2-CLEAR EDT-IO
+	     EDT-COM-EXIT-TOP-LEVEL ED-COM-INSERT-INTERACTION
+	     TV-HOLLOW-RECTANGULAR-BLINKER TV-IBEAM-BLINKER
+	     ))
+
+(SPECIAL EDT-ACTIVATION-LIMIT-BP EDT-BP
+	 EDT-EDITOR-STACK-GROUP EDT-BUFFER EDT-IO-UNRCHF EDT-INSIDE-EDT-IO-P 
+	 EDT-ACTIVATION-BP-LIST EDT-FINISHING-BP-LIST EDT-ROOM-NEEDED
+	 )
+
+(DEFUN EDT (&OPTIONAL (WINDOW ED-MAIN-WINDOW))
+    (EDT-SETUP WINDOW NIL)
+    (SETQ STANDARD-OUTPUT 'EDT-IO
+	  STANDARD-INPUT 'EDT-IO
+	  ERROR-OUTPUT 'EDT-IO)
+    "Welcome to the editor top level")
+
+; This is called in Process A to set up the editor top level.  After this has
+;    been called, the stream (EDT-IO) will work.
+(DEFUN EDT-SETUP (WINDOW PROMPT-STRING)
+    (SETQ EDT-INSIDE-EDT-IO-P NIL)
+    (OR (BOUNDP 'EDT-EDITOR-STACK-GROUP)
+	(SETQ EDT-EDITOR-STACK-GROUP
+	      (MAKE-STACK-GROUP 'EDT-EDITOR-STACK-GROUP
+	       (MASK-FIELD %%SG-ST-SWAP-SV-OF-SG-THAT-CALLS-ME -1)
+	       DEFAULT-ARRAY-AREA
+	       ERROR-LINEAR-PDL-AREA 3000
+	       DEFAULT-ARRAY-AREA 400)))
+    (SETQ EDT-IO-UNRCHF NIL)
+    (STACK-GROUP-PRESET EDT-EDITOR-STACK-GROUP (FUNCTION EDT-TOP-LEVEL) WINDOW PROMPT-STRING)
+    ; -- Set up EDT special variables.
+
+    (ED-ENTER)
+    (COND ((NOT (BOUNDP 'EDT-BUFFER))
+	   (SETQ EDT-BUFFER (ED-CREATE-BUFFER (INTERN "Editor Top Level") 1000.))
+	   (SETQ EDT-ROOM-NEEDED 50.)
+	   (SETQ EDT-BP					;This is "BP2"
+		 (ED-PERMANIZE-BP (ED-COPY-BP (ED-BUFFER-POINT EDT-BUFFER))))
+	   (SETQ EDT-ACTIVATION-LIMIT-BP		;This is "BP3"
+		 (ED-PERMANIZE-BP (ED-COPY-BP (ED-BUFFER-POINT EDT-BUFFER))))
+	   (SETQ EDT-ACTIVATION-BP-LIST NIL
+		 EDT-FINISHING-BP-LIST NIL)))
+    (SETF (ED-BUFFER-BLINKER-ALIST EDT-BUFFER)
+;	  `( ( ,EDT-BP TV-IBEAM-BLINKER BLINK)
+;	     ( ,EDT-ACTIVATION-LIMIT-BP TV-HOLLOW-RECTANGULAR-BLINKER BLINK)
+;For now only display one of these, it looks nicer. )
+          `( ( ,EDT-BP TV-IBEAM-BLINKER T))
+	     )
+	  )
+
+
+; This is the editor top level itself.  It is a standard editor "top level" function, 
+;    i.e. it sets up buffers, windows, and such, and calls ED-TOP-LEVEL.  It runs
+;    in process B at the base of the stack group.
+(DEFUN EDT-TOP-LEVEL (WINDOW PROMPT-STRING &AUX (ED-OPEN-BUFFER EDT-BUFFER))
+
+; -- Modify the keyboard layout.
+    (BIND (AP-2 ED-COMMAND-DISPATCH-TABLE 3 131) 'ED-COM-INSERT-INTERACTION) ;CMY
+    (BIND (AP-2 ED-COMMAND-DISPATCH-TABLE 1 132) 'EDT-COM-EXIT-TOP-LEVEL)    ;cZ
+    (BIND (AP-2 ED-COMMAND-DISPATCH-TABLE 2 132) NIL)			     ;mZ
+    (BIND (AP-2 ED-COMMAND-DISPATCH-TABLE 3 132) NIL)			     ;cmZ
+    (BIND (AP-2 ED-COMMAND-DISPATCH-TABLE 0 202) 'EDT-COM-INTERIM-2-CLEAR)   ;CLEAR
+    (BIND (AP-2 ED-COMMAND-DISPATCH-TABLE 1 215) 'EDT-COM-ACTIVATE)	     ;cRETURN
+
+; -- Set up environment.
+
+    ;Note that ED-OPEN-BUFFER is bound above (as an AUX variable)
+    (SETQ ED-WINDOW WINDOW)
+    (ED-SELECT-BUFFER WINDOW EDT-BUFFER)
+    (SETQ ED-WINDOWS-DISPLAYED (LIST WINDOW))
+    (ED-MOVE-BP (ED-BUFFER-POINT) EDT-BP)
+
+; Do something for the prompt!  A list of demons?
+ ((LAMBDA (STANDARD-OUTPUT STANDARD-INPUT ERROR-OUTPUT)
+    (*CATCH 'EDT-EXIT (ED-TOP-LEVEL)))
+  'CONSOLE-IO						;This lambda is magic and has to do 
+  'CONSOLE-IO						;  with stack groups.  Don't remove it.
+  'CONSOLE-IO)
+ (ED-RESET-STANDARD-STREAMS)
+ (ED-RECOVER)
+ (TV-CLEAR-PC-PPR CONSOLE-IO-PC-PPR)
+ NIL)    ;Tell EDT-IO that this is the EOF.
+
+(DEFUN EDT-EXIT ()
+    (ED-RESET-STANDARD-STREAMS)    
+    (ED-RECOVER)
+    (TV-CLEAR-PC-PPR CONSOLE-IO-PC-PPR)
+    NIL)
+
+
+; This is the command to activate text; it runs in Process B.
+(DEFUN EDT-COM-ACTIVATE (CHR &AUX ROOM)
+    ; LOCK THE EDITOR?
+    (COND ((OR (NEQ (ED-LINE-BUFFER (ED-BP-LINE (ED-BUFFER-POINT)))
+		    (ED-LINE-BUFFER (ED-BP-LINE EDT-ACTIVATION-LIMIT-BP)))
+	       (ED-BP-< (ED-BUFFER-POINT)  EDT-ACTIVATION-LIMIT-BP))
+	   (ED-BARF)))
+    (ED-MOVE-BP EDT-ACTIVATION-LIMIT-BP (ED-BUFFER-POINT))
+    (SETQ EDT-ACTIVATION-BP-LIST
+	  (CONS (ED-PERMANIZE-BP (ED-COPY-BP EDT-ACTIVATION-LIMIT-BP))
+		EDT-ACTIVATION-BP-LIST))
+    (SETQ EDT-FINISHING-BP-LIST
+	  (CONS (ED-PERMANIZE-BP (ED-COPY-BP EDT-BP))
+		EDT-FINISHING-BP-LIST))
+
+
+    ;******************** ERROR CHECK:
+    (COND ((ED-BP-< EDT-ACTIVATION-LIMIT-BP EDT-BP)
+	   (ERROR "BP3 < BP2 !!! -- EDT-COM-ACTIVATE" T)))
+    ;******************** END ERROR CHECK.
+
+    ; KLUDGE for simulating a real scheduler:
+    (STACK-GROUP-RETURN T) ;Tell EDT-IO that this is NOT EOF.
+
+    (ED-MOVE-BP (ED-BUFFER-POINT) EDT-BP)
+
+    (SETQ ROOM (- (ARRAY-LENGTH ED-OPEN-BUFFER)
+		  (ARRAY-ACTIVE-LENGTH ED-OPEN-BUFFER)))
+    (COND ((< ROOM EDT-ROOM-NEEDED)
+	   (ED-DELETE-BETWEEN (ED-BP 0 (AR-1 ED-OPEN-BUFFER 0) 'TEMP)
+			      (ED-BP 0 (AR-1 ED-OPEN-BUFFER (- EDT-ROOM-NEEDED ROOM)) 'TEMP))))
+    ED-DIS-BUFFER)
+
+; Interim II style clear the screen.  This runs in process B.  It is another "high"
+;   level window function.
+(DEFUN EDT-COM-INTERIM-2-CLEAR (CHR)
+    (ED-WINDOW-RECENTER EDT-BP ED-WINDOW 0)
+    ED-DIS-NONE)
+
+;This command tries to exit EDT. It runs in process B.
+(DEFUN EDT-COM-EXIT-TOP-LEVEL (CHR)
+    (*THROW 'EDT-EXIT NIL)
+    ED-DIS-BUFFER)
+
+; This command insters at point the text in the last interaction (poor pharsing).
+(DEFUN ED-COM-INSERT-INTERACTION (CHR)
+    (COND ((OR (< ED-NUMERIC-ARG 1)
+	       (> ED-NUMERIC-ARG (LENGTH EDT-ACTIVATION-BP-LIST)))
+	   (ED-BARF)))
+    (ED-INSERT-BETWEEN (NTH (1- ED-NUMERIC-ARG) EDT-ACTIVATION-BP-LIST)
+		       (NTH (1- ED-NUMERIC-ARG) EDT-FINISHING-BP-LIST)
+		       (ED-BUFFER-POINT))
+    ED-DIS-BUFFER)
+
+; This is the stream.  It runs in Process A.  Be sure to call EDT-SETUP before 
+;    trying to use this.
+(DEFUN EDT-IO (OP &OPTIONAL ARG1 &AUX EQUALP TEM)
+       (COND (EDT-INSIDE-EDT-IO-P
+	      (FUNCALL 'CONSOLE-IO OP ARG1))
+	     (T 
+	      ((LAMBDA (EDT-INSIDE-EDT-IO-P)
+    (SELECTQ OP
+	     (TYI
+	      (COND (EDT-IO-UNRCHF
+		     (PROG1 EDT-IO-UNRCHF (SETQ EDT-IO-UNRCHF NIL)))
+		    (T
+		     ((LAMBDA (ED-OPEN-BUFFER)
+			      (DO ()
+				  ((ED-BP-< EDT-BP EDT-ACTIVATION-LIMIT-BP)
+				   (PROG1 (ED-BP-CHAR EDT-BP)
+					  (ED-IBP EDT-BP)))
+				(OR (FUNCALL EDT-EDITOR-STACK-GROUP)
+				    (RETURN NIL))))
+		      EDT-BUFFER))))
+	     (UNTYI
+	      (SETQ EDT-IO-UNRCHF ARG1))
+	     (TYO
+	      ;Lock the editor?
+	      ((LAMBDA (ED-INTERACTIVE-P ED-OPEN-BUFFER)
+		       (SETQ EQUALP (EQUAL EDT-BP EDT-ACTIVATION-LIMIT-BP))
+		       (COND ((CHAR-EQUAL ARG1 215)
+			      (ED-INSERT-CRS-MOVING EDT-BP 1))
+			     (T (ED-INSERT-CHARS-MOVING EDT-BP ARG1)))
+		       (AND EQUALP (ED-MOVE-BP EDT-ACTIVATION-LIMIT-BP EDT-BP))
+		       )
+	       
+	       NIL
+	       EDT-BUFFER))
+	     (OTHERWISE
+	      (ERROR "Unknown operation to EDT-STREAM" OP)))) T)) ))

@@ -1,0 +1,79 @@
+Here's the barest minimum you need to get started with EINE:
+
+    In EINE as soon as you type any character, some action is performed, and
+you see the resulting buffer.  Generally, graphic, printing characters insert
+themselves, while control characters do the editing.  So, to insert some text,
+just type it.  To make corrections, you use the control characters.  Here is a
+simple description of what various control characters do:
+
+        C-F      Move forward one character.
+        C-B      Move backward one character.
+        C-H      Move backward one character (same as C-B).
+        C-D      Delete next character.
+        Rubout   Delete last character.
+		 (Rubout isn't a control character, but
+		  its function is like those of control characters).
+
+        C-A      Move to beginning of this line.
+        C-E      Move to end of this line.
+        C-N      Move to next line.
+        C-P      Move to previous line.
+        C-K      Kill rest of line.
+	C-Y	 Un-kill ("yank") what was just killed, inserting it
+		  into the buffer at the current position.
+        C-@      Mark this place in the buffer.
+        C-W      Kill  ("wipe  out") from here to marked place.
+		  (C-Y will un-kill C-W-killed text too.)
+        C-L      Clear screen, redisplay buffer.
+	C-G	 "Quit".  Stops whatever EINE is doing.
+
+        C-X      Prefix character:  follow with another character to
+                  make a 2-character C-X command.
+
+	C-X C-V  Visit a file.  See below.
+	C-X C-S  Save the file you are visiting.
+
+    An easy way to move text around is to kill it, move, then un-kill.
+You can un-kill any number of times to create copies in different
+places.
+
+    If you want to edit text and save it after one session, you must
+put it in a "file".  To do this, type the C-X C-V command, followed by
+the name you would like to use for your file.  When you have finished
+typing the filename, end it with a carriage-return ("<CR>", as we say).
+"(New File)" will be printed at the bottom of the screen, and the
+file's name will appear in the line which starts with "EINE (" near
+the bottom.  Now you are ready to type in the text of the file.
+
+    ITS files have 4 parts to their names, completely specified:
+
+        device: directory; filename1 filename2
+
+    But generally, you should specify only one name, which should not
+contain a space, colon or semicolon.  This will keep files on your
+directory, on device DSK, and will use the filename2 to hold the
+file's version number.  Each time you save, a new version number will
+be used.  This way, each new save doesn't make the previous saves go
+away.  You should specify the directory only if you need to edit or
+look at a file on someone else's directory.  You should specify the
+filename2 only if you need to look at or edit a file whose filename2
+is not a version number.
+
+    After you have typed for a while, type C-X C-S to "save" what you
+have added to the file so far.  The text doesn't really go into the
+file until you save it.  After saving, you can edit some more and
+save again, etc.  If the system crashes, you can't lose anything which
+you have saved already.  
+
+    When you want to switch to writing a different file, just use the
+C-X C-V command again.  The same command allows you to make changes in
+an old file.  If you do C-X C-V when you have made changes to a file
+but not saved them, EINE will ask you whether to save them.  You
+should type either "Y" or "N" as the answer.  Or type C-G to quit,
+look around to decide what to do, save or not, and repeat the C-X C-V.
+Don't ever be afraid to quit.
+
+    If you need more help,  you can get it by typing the Help
+character which you used in order to see this.  You typed Help B;
+typing other things after Help gets other kinds of help.
+

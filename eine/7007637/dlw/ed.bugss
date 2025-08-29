@@ -1,0 +1,22 @@
+
+3) PUT IN WINNING EMACS CR.
+
+6) THERE WHOULD BE A WAY TO EDIT AN ARBITRARY PROPERTY
+OF AN ATOM.  MODIFY GRINDEF TO KNOW HOW TO DO (PUTPROP --)?
+
+7) WILL BUFFERS EXPAND?
+
+13) write DRIBBLE-IO
+
+16) Debug CHARACTER SEARCH.
+
+17) MARK-PDL per buffer, and ^S and ^K pdl editor-wide?
+
+19) Debug redisplay some more.
+
+20) Debug SAVE-IN-BUFFER
+
+21) Put in c-( and c-) (functions exist, just install them...)
+
+22) ED-DID-I-GET-AN-ARG-P.  Set to NIL by editor stuff, but ^u knows how to hack it etc.
+

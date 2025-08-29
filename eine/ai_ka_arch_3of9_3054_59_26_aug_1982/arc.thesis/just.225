@@ -1,0 +1,637 @@
+;;; Text Justifier for the Lisp Machine manual - basic routines  -*-LISP-*-
+
+;;; "In just seven days, I can make you a ma - a - a - anual"
+;;;					- Charles Atlas (i.e. Richard O'Brien)
+
+(SETQ NEXT-ODD-TOP-RIGHT-HEADING NIL
+      NEXT-EVEN-TOP-LEFT-HEADING NIL)
+
+(INCLUDE |LMMAN;JUSTDF >|)
+
+(ARRAY FONT-WIDTH-TABLES T 10)
+(ARRAY FONT-HEIGHT-TABLE T 10)
+(ARRAY FONT-BASELINE-TABLE T 10)
+;This array maps from our font numbers to the cretinous XGP's,
+;because the cretinous XGP doesn't know that two fonts can be
+;the same font, and runs out of storage.
+(ARRAY XGP-FONT-RENAME T 20)
+(ARRAY XGP-FONT-NAME T 10)
+;XGP-FONT-RENAME is the only array indexed by the number you put after ^F
+
+(DEFUN CHAR-WIDTH (CHAR)
+  (COND ((= CHAR 24) THIN-SPACE-WIDTH)
+	((LET ((CH (BOOLE 1 177 CHAR))
+	       (FONT (CH-FONT CHAR)))
+	   (DECLARE (FIXNUM CH FONT))
+	   (ARRAYCALL FIXNUM (FONT-WIDTH-TABLES FONT) CH)))))
+
+(DEFUN WHITE-SPACE-P (CH)
+  (SETQ CH (CH-CHAR CH))	;Clear font, leave char code and quote bit
+  (OR (= CH 40) (= CH 11) (= CH 12) (= CH 14)))
+
+;This routine could be smarter.  In keeping with the philosophy, it's not
+;user-parametizable, instead the user is supposed to just replace the routine bodily.
+(DEFUN EXTRA-INTERWORD-SPACING (CH) ;Argument is last character in word
+  (SETQ CH (CH-CHAR CH)) ;Needed??
+  (COND ((OR (= CH 56) (= CH 41) (= CH 77) (= CH 72)) ;Period, excl, question, colon
+	 10.) ;1/20 inch
+	((OR (= CH 73) (= CH 54)) ;Semicolon, comma
+	 5.) ;1/40 inch
+	(T 0)))
+
+;;; This is the only routine (except for the ones below) that should ever be allowed to output
+;;; vertical motion to the XGP.  It will keep track of various things.
+(DEFUN LINE-ADVANCE ()
+  (JOUT0 15)
+  (JOUT0 12)
+  (SETQ CUR-VPOS (+ CUR-VPOS
+		    XGP-BASELINE
+		    (MAX (- XGP-LINE-HEIGHT XGP-BASELINE)
+			 (+ PREV-LINE-BOTTOM-EXTRA CUR-LINE-TOP-EXTRA)))
+	CUR-HPOS 0
+	LEADING-BEFORE-NEXT-LINE 0
+	PREV-LINE-BOTTOM-EXTRA CUR-LINE-BOTTOM-EXTRA
+	CHARS-ON-THIS-LINE-P NIL
+	CUR-BASELINE (FONT-BASELINE-TABLE JOUT-CUR-XGP-FONT)
+	CUR-LINE-TOP-EXTRA (MAX 0 (- CUR-BASELINE XGP-BASELINE))
+	CUR-LINE-BOTTOM-EXTRA (MAX 0 (- (FONT-HEIGHT-TABLE JOUT-CUR-XGP-FONT) XGP-BASELINE)))
+  (AND (> CUR-VPOS ALARM-VPOS)
+       (NEXT-PAGE)))
+
+;;; Do a NEXT-PAGE if insufficient room on this page.  Returns T if did one.
+(DEFUN NEED-SPACE (N)
+  (DECLARE (FIXNUM N))
+  (COND ((> N (- ALARM-VPOS CUR-VPOS))
+	 (NEXT-PAGE)
+	 T)
+	(T NIL)))
+
+;;; This function declares that a certain amount of leading is required before
+;;; the next line.  The actual amount put will be the MAX of all calls to OUTPUT-LEADING,
+;;; except that leading is omitted at the top of a page.
+;;; Also, NEED-SPACE is called, the idea being to go to a new page now if
+;;; we would have to do so later anyway. 
+;;; Output a certain amount of vertical spacing (Pb), or go to a new page
+(DEFUN OUTPUT-LEADING (N)
+  (DECLARE (FIXNUM N))
+  (NEED-SPACE (SETQ LEADING-BEFORE-NEXT-LINE (MAX N LEADING-BEFORE-NEXT-LINE))))
+
+;;; This is to be used by heading generation and the like
+(DEFUN SET-VPOS (N)
+  (DECLARE (FIXNUM N))
+  (COND ((> N CUR-VPOS)
+	 (SETQ CUR-VPOS N)
+	 (JOUT0 177)
+	 (JOUT0 3)
+	 (JOUT0 (LSH N -7))
+	 (JOUT0 (BOOLE 1 177 N)))))
+
+;;; This sets the HPOS, unless we are already to the right of there
+;;; in which case it does nothing and returns NIL.  Caller may
+;;; LINE-ADVANCE if he likes.
+(DEFUN SET-HPOS (N)
+  (DECLARE (FIXNUM N))
+  (COND ((> N CUR-HPOS)
+	 (SETQ CUR-HPOS N)
+	 (JOUT0 177)
+	 (JOUT0 1)
+	 (JOUT0 40)
+	 (JOUT0 (LSH N -7))
+	 (JOUT0 (BOOLE 1 177 N))
+	 T)))
+
+;;; MAIN-LOOP
+;;; This is where we run when between paragraphs, and between input lines.
+;;; We call the request-line processor, the nofill-line processor,
+;;; or the paragraph processor, as appropriate.
+;;; Inter-paragraph leading and indentation are hacked here.
+
+(DEFUN MAIN-LOOP ()
+  (DO ((CUR-HPOS)	;I wonder why I'm binding this
+       (CH)
+       (TEM))
+      (NIL)
+    (DECLARE (FIXNUM CH TEM))
+    ;; Look ahead at the next character, may be white space or start of a request
+    ;; Here we are looking at actual characters in the file, not yet run through
+    ;; the input processor.  This is the right thing for reasons which aren't hard to see.
+    ;; Note that when we get here we are for sure at the beginning of an input line.
+    (SETQ CH (JIN-TYI))
+    (COND ((OR (= CH 56)	    ;Dot at the beginning of an input line means request
+	       (= CH 47))	    ;So does quote (catch here to avoid putting a blank line)
+	   (CATCH
+	      (PROCESS-REQUEST)	    ;All requests are breaks, but do not begin a paragraph
+	      MAIN-LOOP))
+	  ((= CH 14))		    ;Ignore form feeds
+	  ((NOT FILL-MODE-P)	    ;If not in Fill mode, output a line
+	   (JIN-UNTYI)		    ;put back the character peeked at
+	   (OUTPUT-PENDING-LEADING)
+	   (SET-HPOS (+ LEFT-MARGIN LEFT-INDENT))   ;Position cursor at proper left margin
+	   (OUTPUT-NOFILL-LINE)	    ;Output characters until LF
+	   (LINE-ADVANCE))
+	  ((= CH 15))		    ;Ignore carriage returns when in fill mode
+	  ((= CH 12)		    ;Blank line in fill mode separates paragraphs
+	   (SETQ BEGIN-NEW-PARAGRAPH T))
+	  (T			    ;Fill mode processing
+	   (COND ((WHITE-SPACE-P CH)	    ;Indented line starts a paragraph
+		  (SETQ BEGIN-NEW-PARAGRAPH T)
+		  (DO CH (JIN-TYI) (JIN-TYI)	    ;Absorb indentation
+		      (OR (= CH 15) (NOT (WHITE-SPACE-P CH))))))
+	   ;; CH has first non-white character of paragraph, or CR if line with only spaces
+	   (COND ((NOT (= CH 15))   ;If we have a non-empty paragraph, output it
+		  (JIN-UNTYI)	    ;Put back first character of paragraph
+		  (SETQ TEM 0)
+		  (COND (BEGIN-NEW-PARAGRAPH
+			 (SETQ BEGIN-NEW-PARAGRAPH NIL)
+			 (OUTPUT-LEADING INTERPARAGRAPH-LEADING)
+			 (NEED-SPACE 100.)	;Anti-widow
+			 (SETQ TEM EXTRA-LEFT-INDENT-FIRST-LINE-OF-PARAGRAPH)))
+		  (OUTPUT-PENDING-LEADING)
+		  (OUTPUT-PARAGRAPH (+ LEFT-MARGIN LEFT-INDENT TEM))))))))
+
+(DEFUN OUTPUT-PENDING-LEADING ()
+  (OR (NOT CHARS-ON-THIS-PAGE-P)  ;Unless we are at top of page
+      (ZEROP LEADING-BEFORE-NEXT-LINE)	    ; output pending leading
+      (SET-VPOS (+ CUR-VPOS LEADING-BEFORE-NEXT-LINE)))
+  (SETQ LEADING-BEFORE-NEXT-LINE 0)) ;If at top of page, just flush it
+
+;;; Process one line in nofill mode.
+;;; LINE-ADVANCE must be done outside this function.
+(DEFUN OUTPUT-NOFILL-LINE ()
+ (DO ((INIT-POS (JIN-GET-POS))
+      (CH (JIN) (JIN))		    ;Read characters through input processor until LF
+      (HPOS CUR-HPOS))		    ;Keep track of HPOS
+     ((= CH 12)
+      (JIN-ABSORB INIT-POS (JIN-GET-POS))    ;Finally eat all characters output
+      (AND (> HPOS (- RIGHT-MARGIN RIGHT-INDENT))
+	   (BARF '|Line too long:| HPOS '|, max is | (- RIGHT-MARGIN RIGHT-INDENT)))
+      (SETQ CUR-HPOS HPOS))	    ;Sometimes needed
+   (DECLARE (FIXNUM INIT-POS CH HPOS))
+   (COND ((= (CH-CHAR CH) 11)	    ;Adjust HPOS, tab requires special processing
+	  (SET-HPOS (SETQ HPOS (TAB-HPOS (CH-FONT CH) HPOS))))
+	 ((= CH 24)		    ;Thin space requires special processing
+	  (SETQ HPOS (+ HPOS THIN-SPACE-WIDTH)))
+	 (T			    ;Ordinary character, output and keep track of HPOS
+	  (SETQ HPOS (+ HPOS (CHAR-WIDTH CH)))
+	  (JOUT CH)))))			    ;Hand character to output processor
+
+;;; Outputting of a string in nofill mode.  String better not contain any LFs
+(DEFUN OUTPUT-NOFILL-STRING (STR)
+    (JIN-PUSH LF-STR)
+    (JIN-PUSH STR)
+    (OUTPUT-NOFILL-LINE)	;Elegant, eh?
+    (JIN-CLEANUP))		;Avoid the danger and inconvenience of stack overflow
+
+;;; OUTPUT-PARAGRAPH, ventra hacorum
+(DEFUN OUTPUT-PARAGRAPH (FIRST-LINE-INDENT)
+  ;; This loop is for each output line, until something breaks the paragraph
+  (DO ((INDENT FIRST-LINE-INDENT (+ LEFT-MARGIN LEFT-INDENT))
+       (HPOS)
+       (PREV-CH 12)	;Initially LF since we are always called at start of line
+       (TEM)
+       (BREAK-FLAG NIL))
+      (BREAK-FLAG)
+    (DECLARE (FIXNUM INDENT HPOS PREV-CH TEM))
+    (SET-HPOS INDENT)
+    (SETQ HPOS INDENT)
+    ;; This loop is for each word until an output line has been formed
+    (DO ((FILL-IN-SPACING-BP-LIST NIL)  ;Reclaimable list of bps to white-space xgp cmnds
+	 (INK-AMT 0)	;Amount of horizontal spacing, except adjustable white space
+	 (BK-BP)	;Backup variables
+	 (BK-XGP-FONT)
+	 (BK-POS)
+	 (BK-INK-AMT)
+	 (BK-HPOS)
+	 (WORD-HPOS)
+	 (BK-EXTRA-SPACE 0)
+	 (HYPHEN-FLAG NIL NIL)	;This word broken at a hyphen
+	 (BK-HYPHEN-FLAG NIL)	;Last word broken at a hyphen 
+	 (NWSP -1)	;Number of white-spaces required
+	 (MARGIN (- RIGHT-MARGIN RIGHT-INDENT))
+	 (INIT-POS (JIN-GET-POS))
+	 (CH (JIN)))	;Next character of input
+	(NIL)  ;Too hairy to put endtest here, we'll put it down below and use RETURN
+      (DECLARE (FIXNUM INK-AMT BK-BP BK-XGP-FONT BK-POS BK-INK-AMT BK-HPOS WORD-HPOS
+		       BK-EXTRA-SPACE NWSP MARGIN INIT-POS CH))
+      ;; If we are after a word, adjust HPOS by appropriate amount of inter-word spacing
+      ;; But no spacing at beginning of line or after a hyphen
+      (OR (ZEROP INK-AMT)
+	  BK-HYPHEN-FLAG ;No space after a hyphen
+	  (SETQ HPOS (+ HPOS MIN-WHITE-SPACE-BETWEEN-WORDS BK-EXTRA-SPACE)))
+      (SETQ INK-AMT (+ INK-AMT BK-EXTRA-SPACE)) ;Ink to start of this word, which includes
+						; any extra space at end of previous word.
+      ;; Between words, skip over white space
+      (DO () ((OR (= PREV-CH 12) (NOT (WHITE-SPACE-P CH))))
+        (SETQ PREV-CH (CH-CHAR CH) CH (JIN)))
+      ;; If at start of input line, check for break
+    A (AND (= PREV-CH 12)
+	   (COND ((OR (= (CH-CHAR CH) 56)	;Dot causes a break
+		      (WHITE-SPACE-P CH))	;So does indented or blank line
+		  (JIN-UNTYI)			;Put this character back in input stream
+		  (JIN-ABSORB INIT-POS (JIN-GET-POS))	;Eat characters in final line
+		  (SETQ CUR-HPOS HPOS)
+		  (RECLAIM FILL-IN-SPACING-BP-LIST T)
+		  (LINE-ADVANCE)
+		  (RETURN (SETQ BREAK-FLAG T)))	;Return from OUTPUT-PARAGRAPH
+		 ((= (CH-CHAR CH) 47)		;Non-breaking request
+		  (PROCESS-REQUEST)		;Process it, not affecting "JIN" buffer
+		  (SETQ PREV-CH 12 CH (JIN))	;Re-enter paragraph output
+		  (GO A))))
+      ;;Current character is the start of a word
+      (SETQ BK-POS (1- (JIN-GET-POS))		;Set pos here to re-read current char
+	    WORD-HPOS HPOS
+	    PREV-CH (CH-CHAR CH))
+      ;;This loop processes each character in a word, or a line, or whatever
+      (DO ((START T NIL)
+	   (PREV-FONT))
+	  (NIL)					;Do until explicit RETURN
+	(DECLARE (FIXNUM PREV-FONT))
+	(JOUT CH)
+	(SETQ HPOS (+ HPOS (CHAR-WIDTH CH)))
+	(SETQ PREV-CH (CH-CHAR CH) PREV-FONT (CH-FONT CH) CH (JIN))
+	(COND ((WHITE-SPACE-P CH)		;Word ends with white-space
+	       (RETURN NIL))
+	      (T
+	       (AND (NOT (= (CH-FONT CH) PREV-FONT))
+		    (NOT (ZEROP (SETQ TEM (FONT-ITALIC-CORRECTION PREV-FONT))))
+		    (PROGN (SETQ HPOS (+ HPOS TEM))
+			   (JOUT-WHITE-SPACE TEM)))
+	       (AND (NOT START)			;Hyphen in the middle of a word is magic
+		    (= PREV-CH 55)
+		    (RETURN (SETQ HYPHEN-FLAG T))))))
+      ;;Here the current character (CH) is the break after a word, PREV-CH is last in word
+      (COND ((NOT (> HPOS MARGIN))  ;This word fits, put adjustable white space after it
+	     (SETQ INK-AMT (+ INK-AMT (- HPOS WORD-HPOS)))  ;Amount of ink in this word
+	     (SETQ BK-BP OUTPUT-BP		;If we need to back up to end of this word
+		   BK-XGP-FONT JOUT-CUR-XGP-FONT
+		   BK-INK-AMT INK-AMT		;Ink to end of this word
+		   BK-HPOS HPOS)
+	     (SETQ BK-EXTRA-SPACE 0 BK-HYPHEN-FLAG HYPHEN-FLAG)
+	     (COND ((NOT BK-HYPHEN-FLAG)	;If broken by white-space, not hyphen
+		    (SETQ NWSP (1+ NWSP)	;then there should be white-space here
+			  BK-EXTRA-SPACE (EXTRA-INTERWORD-SPACING PREV-CH))
+		    (JOUT0 177)
+		    (JOUT0 2)
+		    ;; Insert white space which is correct if line not to be justified, i.e.
+		    ;; last line of paragraph.  Gets patched later if line is justified.
+		    (JOUT0 (+ BK-EXTRA-SPACE MIN-WHITE-SPACE-BETWEEN-WORDS))
+		    (SETQ FILL-IN-SPACING-BP-LIST
+			  (CONS (NUMBER-COPY OUTPUT-BP) FILL-IN-SPACING-BP-LIST)))))
+	    (T
+	     ;; We went past the right margin, go back to end of previous word
+	     ;; in the output stream and start of this word in the input stream.
+	     (COND (BK-HYPHEN-FLAG (SETQ NWSP (1+ NWSP))) ;Allow for line ending in hyphen
+		   (T (LET ((TEMMMM (CAR FILL-IN-SPACING-BP-LIST)))  ;Don't do last space
+			(SETQ FILL-IN-SPACING-BP-LIST (CDR FILL-IN-SPACING-BP-LIST))
+			(RPLACD TEMMMM NIL)
+			(RECLAIM TEMMMM T))))
+	     ;; NWSP is 1 less than the number of words.
+	     (COND ((< NWSP 0)	    ;What should we do if we only got one word?
+		    (BREAK WORD-TOO-LONG-FOR-LINE T)))
+	     (SETQ INK-AMT BK-INK-AMT
+		   CUR-HPOS BK-HPOS
+		   OUTPUT-BP BK-BP
+		   JOUT-CUR-XGP-FONT BK-XGP-FONT)
+	     (JIN-SET-POS BK-POS)		;Back up input to that point
+	     (JIN-ABSORB INIT-POS BK-POS)	;Absorb previous characters, which were OK
+	     ;; Fill in the adjustable white space
+	     (DO ((WSP (// (- MARGIN INDENT INK-AMT) NWSP))	;Garbage if NWSP 0 or -1
+		  (RESIDUE (\ (- MARGIN INDENT INK-AMT) NWSP))
+		  (WID)
+		  (L FILL-IN-SPACING-BP-LIST (CDR L)))
+		 ((NULL L))
+	       (DECLARE (FIXNUM WSP RESIDUE WID))
+	       (SETQ WID (+ (- (LDB-CH (CAR L))
+			       MIN-WHITE-SPACE-BETWEEN-WORDS)
+			    (COND ((ZEROP RESIDUE) WSP)
+				  (T (SETQ RESIDUE (1- RESIDUE))
+				     (1+ WSP)))))
+	       (AND (> WID 77)
+		    (BARF WID '| is excessive justification space - OUTPUT-PARAGRAPH|))
+	       (DPB-CH WID (CAR L)))
+	     (RECLAIM FILL-IN-SPACING-BP-LIST T)
+	     (LINE-ADVANCE)
+	     (RETURN NIL)  ;Escape from per-word loop, next iteration of per-line loop
+	     )))))
+
+;;; Tab computator.
+;;; Tabbing uses width of space in current font and is relative to left margin.
+(DEFUN TAB-HPOS (FONT HPOS)
+  (LET ((TAB-WIDTH (* 8 (ARRAYCALL FIXNUM (FONT-WIDTH-TABLES FONT) 40))))
+    (DECLARE (FIXNUM TAB-WIDTH))
+    (+ LEFT-MARGIN LEFT-INDENT
+       (* TAB-WIDTH (1+ (// (- HPOS (+ LEFT-MARGIN LEFT-INDENT))
+			    TAB-WIDTH))))))
+
+;;; Computes the number of raster units occupied by a string.  Must not
+;;; contain LF.  Assumes no adjusting of white space.
+;;; Uses current font (JIN-CUR-FONT), doesn't allow tabs.
+(DEFUN STRING-PUSH-GET-WIDTH (STR)
+  (LET ((SAVE-POS (JIN-GET-POS)))
+    (DECLARE (FIXNUM SAVE-POS))
+    (JIN-PUSH LF-STR)
+    (JIN-PUSH STR)
+    (DO ((CH (JIN) (JIN))	;Read characters through input processor until LF
+	 (XLEN 0))
+	((= CH 12)
+	 (JIN-SET-POS SAVE-POS)	;Let caller scan these chars again.  He will need to absorb.
+	 (JIN-CLEANUP)		;Avoid the danger and inconvenience of stack overflow
+	 XLEN)
+      (DECLARE (FIXNUM CH XLEN))
+      (COND ((= (CH-CHAR CH) 11)
+	     (BARF '|TAB is illegal in these circumstances - STRING-PUSH-GET-WIDTH|))
+	    ((= CH 24) (SETQ XLEN (+ XLEN THIN-SPACE-WIDTH)))
+	    (T (SETQ XLEN (+ XLEN (CHAR-WIDTH CH))))))))
+
+;;; Looking at and updating CUR-HPOS and font, put a string flush-right
+;;; Don't expect to win with tabs.
+(DEFUN PUT-STRING-FLUSH-RIGHT (STR MARGIN)
+  (DECLARE (FIXNUM MARGIN WIDTH FONT-PDL-LEVEL))
+  (LET ((WIDTH (STRING-PUSH-GET-WIDTH STR))
+	(FONT-PDL-LEVEL (FONT-PDL 0)))
+    (OR CHARS-ON-THIS-LINE-P (OUTPUT-PENDING-LEADING))
+    (SET-HPOS (- MARGIN WIDTH))
+    (OUTPUT-NOFILL-LINE)
+    (CHECK-FONT-PDL-LEVEL FONT-PDL-LEVEL)))
+
+;;; Looking at and updating CUR-HPOS and font, put a string flush-left
+(DEFUN PUT-STRING-FLUSH-LEFT (STR)
+  (LET ((FONT-PDL-LEVEL (FONT-PDL 0)))
+    (DECLARE (FIXNUM FONT-PDL-LEVEL))
+    (OR CHARS-ON-THIS-LINE-P (OUTPUT-PENDING-LEADING))
+    (OUTPUT-NOFILL-STRING STR)
+    (CHECK-FONT-PDL-LEVEL FONT-PDL-LEVEL)))
+
+;;; Looking at and updating CUR-HPOS and font, put a string centered
+;;; Don't expect to win with tabs.
+(DEFUN PUT-STRING-CENTERED (STR HPOS)
+  (DECLARE (FIXNUM HPOS WIDTH FONT-PDL-LEVEL))
+  (LET ((WIDTH (STRING-PUSH-GET-WIDTH STR))
+	(FONT-PDL-LEVEL (FONT-PDL 0)))
+    (OR CHARS-ON-THIS-LINE-P (OUTPUT-PENDING-LEADING))
+    (SET-HPOS (- HPOS (// WIDTH 2)))
+    (OUTPUT-NOFILL-LINE)
+    (CHECK-FONT-PDL-LEVEL FONT-PDL-LEVEL)))
+
+;;; Convert a positive number into a decimal representation string
+(DEFUN STRING-NUMBER (NUM)
+  (DECLARE (FIXNUM NUM))
+  (DO ((N-DIGITS 1 (1+ N-DIGITS))
+       (10-TO-N 10. (* 10-TO-N 10.)))
+      ((> 10-TO-N NUM)
+       (DO ((STR (MAKE-STRING N-DIGITS))
+	    (I 0 (1+ I)))
+	   ((= I N-DIGITS) STR)
+	 (DECLARE (FIXNUM I))
+	 (AS-1 (+ (\ (// NUM (SETQ 10-TO-N (// 10-TO-N 10.))) 10.) 60)
+	       STR I)))
+    (DECLARE (FIXNUM N-DIGITS 10-TO-N))))
+
+;;; Page layout stuff
+
+;;; To next page if anything on this page
+(DEFUN FRESH-PAGE ()
+  (AND CHARS-ON-THIS-PAGE-P
+       (NEXT-PAGE)))
+
+;;; This is called to finish off a page and start up the next one.
+;;; Paste up a page of output from headers, output buffer, and footers
+(DEFUN NEXT-PAGE ()
+  ;; If we are in a .GROUP, flush it and back up input to try again
+  (AND GROUP-START-FILEPOS (GROUP-RETRENCH))
+  (DO ((BEGIN-NEW-PARAGRAPH NIL)  ;Don't change paragraph status
+       (BP (NUMBER-COPY OUTPUT-BP))  ;Save end of text
+       (JIN-OLD-PTR)
+       (JIN-OLD-LEN))
+      NIL
+      (DECLARE (FIXNUM JIN-OLD-PTR JIN-OLD-LEN))
+      ;; Save JIN buffer status
+      (SETQ JIN-OLD-PTR (JIN-GET-POS)
+	    JIN-OLD-LEN (JIN-GET-LEN))
+      (JIN-SET-POS JIN-OLD-LEN)
+      ;; If the page is not blank, paste it up and output it
+      (COND (CHARS-ON-THIS-PAGE-P
+	     (DO ((CUR-VPOS 0)
+		  (CUR-HPOS 0)
+		  (LEADING-BEFORE-NEXT-LINE 0)
+		  (SAVE-XGP-FONT JOUT-CUR-XGP-FONT))
+		 NIL
+	       (SET-VPOS TOP-HEADING-VPOS)
+	       (SETQ JOUT-CUR-XGP-FONT -1)	;Non-linear output messes up font select
+	       (TOP-OF-PAGE)			;Generate the page heading
+	       (SET-VPOS TOP-TEXT-VPOS)
+	       (SIOT-BETWEEN-BPS BP OUTPUT-BP)  ;Output it
+	       (SETQ OUTPUT-BP (NUMBER-COPY BP) ;Back up buffer to where it was
+		     JOUT-CUR-XGP-FONT SAVE-XGP-FONT)
+	       ((LAMBDA (ALARM-VPOS CUR-HPOS)  ;No alarms while hacking footers
+		   (SET-VPOS BOTTOM-HEADING-VPOS)
+		   (BOTTOM-OF-PAGE)) ;Generate the page footing
+		1000000 0)
+	       (JOUT0 15)
+	       (JOUT0 14))
+	     (SIOT-BETWEEN-BPS OUTPUT-BUFFER-BP OUTPUT-BP))) ;Output the whole page
+      ;; Initialize variables for the next page
+      (SETQ PAGE-NUMBER (1+ PAGE-NUMBER)
+	    INPUT-FILE-AT-START-OF-PAGE INPUT-FILE
+	    CUR-HPOS 0
+	    LEADING-BEFORE-NEXT-LINE 0
+	    JOUT-CUR-XGP-FONT -1	;So page will start with font select
+	    CHARS-ON-THIS-LINE-P NIL
+	    CHARS-ON-THIS-PAGE-P NIL
+	    HEADING-SET-THIS-PAGE NIL
+	    OUTPUT-BP (NUMBER-COPY OUTPUT-BUFFER-BP)) ;Reset the output buffer
+      (SETQ CUR-VPOS TOP-TEXT-VPOS
+	    PREV-LINE-BOTTOM-EXTRA 0
+	    CUR-BASELINE (FONT-BASELINE-TABLE 0)
+	    CUR-LINE-TOP-EXTRA (MAX 0 (- CUR-BASELINE XGP-BASELINE))
+	    CUR-LINE-BOTTOM-EXTRA (MAX 0 (- (FONT-HEIGHT-TABLE 0)
+					    XGP-BASELINE)))
+;     (COND ((ODDP PAGE-NUMBER)
+;	     (SETQ LEFT-MARGIN ODD-LEFT-MARGIN RIGHT-MARGIN ODD-RIGHT-MARGIN))
+;	    ((SETQ LEFT-MARGIN EVEN-LEFT-MARGIN RIGHT-MARGIN EVEN-RIGHT-MARGIN)))
+      (SETQ LEFT-MARGIN ODD-LEFT-MARGIN RIGHT-MARGIN ODD-RIGHT-MARGIN)
+      ;; This is somewhat of a kludge...
+      (AND NEXT-EVEN-TOP-LEFT-HEADING
+	   (SETQ EVEN-TOP-LEFT-HEADING NEXT-EVEN-TOP-LEFT-HEADING
+		 NEXT-EVEN-TOP-LEFT-HEADING NIL))
+      (AND NEXT-ODD-TOP-RIGHT-HEADING
+	   (SETQ ODD-TOP-RIGHT-HEADING NEXT-ODD-TOP-RIGHT-HEADING
+		 NEXT-ODD-TOP-RIGHT-HEADING NIL))
+      ;; Restore JIN buffer status
+      (OR (= (JIN-GET-LEN) JIN-OLD-LEN)
+	  (ERROR '|Junk left in JIN buffer - djinn escaped? - NEXT-PAGE|))
+      (JIN-SET-POS JIN-OLD-PTR)))
+
+;;; Interim simple-minded heading and footing routines.
+(DEFUN TOP-OF-PAGE ()
+  (LET ((CUR-HPOS 0) (JIN-CUR-FONT 1) (FONT-PDL-LEVEL (FONT-PDL 0)))
+     (DECLARE (FIXNUM FONT-PDL-LEVEL))
+     (SET-HPOS LEFT-MARGIN)
+     (PUT-STRING-FLUSH-LEFT
+;     (COND ((ODDP PAGE-NUMBER) ODD-TOP-LEFT-HEADING)
+;	    (T EVEN-TOP-LEFT-HEADING))
+      ODD-TOP-LEFT-HEADING
+      )
+     (PUT-STRING-CENTERED (STRING-NUMBER PAGE-NUMBER)
+			  (+ LEFT-MARGIN (// (- RIGHT-MARGIN LEFT-MARGIN) 2)))
+     (PUT-STRING-FLUSH-RIGHT
+      ;(COND ((ODDP PAGE-NUMBER) ODD-TOP-RIGHT-HEADING)
+      ;      (T EVEN-TOP-RIGHT-HEADING))
+      ODD-TOP-RIGHT-HEADING
+      RIGHT-MARGIN)
+     (CHECK-FONT-PDL-LEVEL FONT-PDL-LEVEL)
+     (JOUT0 15)
+     (JOUT0 12)))
+
+;Tag each page (crockishly) with the file name it came from and the present date
+(DEFUN BOTTOM-OF-PAGE ()
+  (LET ((CUR-HPOS 0) (JIN-CUR-FONT 1) (FONT-PDL-LEVEL (FONT-PDL 0)))
+     (DECLARE (FIXNUM FONT-PDL-LEVEL))
+     (SET-HPOS LEFT-MARGIN)
+;    (PUT-STRING-FLUSH-LEFT INPUT-FILE-AT-START-OF-PAGE)
+     (PUT-STRING-FLUSH-RIGHT TODAYS-DATE-STRING RIGHT-MARGIN)
+     (CHECK-FONT-PDL-LEVEL FONT-PDL-LEVEL)))
+
+;;; Barf if a string or page heading or something of the sort doesn't
+;;; leave the font pdl as it found it.
+(DEFUN CHECK-FONT-PDL-LEVEL (OLD-LEVEL)
+  (DECLARE (FIXNUM OLD-LEVEL NEW-LEVEL))
+  (LET ((NEW-LEVEL (FONT-PDL 0)))
+    (COND ((NOT (= OLD-LEVEL NEW-LEVEL))
+	   (BARF '|Font pdl height changed from| OLD-LEVEL '|to| NEW-LEVEL
+		 '|while in some string or page heading|)
+	   (STORE (FONT-PDL 0) OLD-LEVEL)))))
+
+(LAP NUMBER-COPY SUBR)
+(ARGS NUMBER-COPY (NIL . 1))
+	(PUSH FXP 0 (A))
+	;(JSP T FWCONS)	;FWCONS is a fucking DDT symbol
+	(MOVSI TT 1)	;A gypsy fortune-teller told me there was no inum for this
+	(JSP T FXCONS)
+	(POP FXP 0 (A))
+	(POPJ P)
+NIL 
+
+;; .EOF request:
+;; Switch input stream to next file.  If no more files, throw out.
+;; The win of this to avoid problems with ^C's, and to provide a break.
+(DEFPROP EOF EOF-REQUEST REQUEST)
+(DEFUN EOF-REQUEST ()
+  (OR FILE-LIST (THROW NIL TJ))
+  ;(JIN-POP)			;Get rid of previous input file
+  (AND (PLUSP JIN-STACK-LEVEL) (ERROR '|.EOF not at top level?|))  ;NOT ZEROP - SUBTLE
+  (SETQ JIN-STACK-LEVEL -1)
+  (JIN-OPEN-FILE (CAR FILE-LIST))
+  (SETQ FILE-LIST (CDR FILE-LIST))
+  (PRINT INPUT-FILE))	;To see how it is progressing
+
+(DEFUN GUDMEN ()
+  (TJ '|MOON;GUDMEN XGP| '( |MOON;GUDMEN >| )))
+
+(DEFUN TJ (OUT-FILE FILE-LIST)
+  (JIN-INIT 50)
+  (REQUEST-INITIALIZE)
+  (GET-TODAYS-DATE)
+  (OR (BOUNDP 'LF-STR)
+      (SETQ LF-STR (STRING-APPEND (MAKNAM '(12)))))
+  (JIN-OPEN-FILE (CAR FILE-LIST))
+  (SETQ FILE-LIST (CDR FILE-LIST))
+  (SETQ OUTPUT-FILE (OPEN (MERGEF '((*)_JUST_ OUTPUT) OUT-FILE) '(OUT BLOCK)))
+  (LINEL OUTPUT-FILE 0) ;Get awaaaaay from me, Newio!
+  (FONT-INIT FONT-LIST)
+  (FORCE-OUTPUT OUTPUT-FILE) ;Not going to use Lisp I/O any more.
+  (SETQ JOUT-CUR-XGP-FONT 0 JIN-CUR-FONT 1 LEFT-INDENT 0 RIGHT-INDENT 0
+	BEGIN-NEW-PARAGRAPH T GROUP-START-BP NIL GROUP-START-FILEPOS NIL)
+  (OUTPUT-INIT)
+  (NEXT-PAGE)	;Start the first page
+  (PRINT INPUT-FILE)
+  (CATCH (MAIN-LOOP)
+	 TJ)
+  (REQUEST-FINALIZE)
+  (FRESH-PAGE)  ;Finish the last page
+  (RENAMEF OUTPUT-FILE OUT-FILE)
+  (CLOSE OUTPUT-FILE))
+
+(DEFUN FONT-INIT (FONTS)
+  (MAPC (FUNCTION (LAMBDA (FONT) (OR (GET FONT 'WIDTH)
+				     (READFONT FONT))))
+	FONTS)
+  (FILLARRAY 'FONT-WIDTH-TABLES '(NIL))
+  (DO ((L FONTS (CDR L))
+       (I 0 (1+ I))		;I number that goes after ^F
+       (NF 0))			;NF XGP font number
+      ((NULL L)
+       (PRINC '|;KSET | OUTPUT-FILE)
+       (DO I 0 (1+ I) (= I NF)
+	 (PRINC (XGP-FONT-NAME I) OUTPUT-FILE)
+	 (PRINC '|,| OUTPUT-FILE)))
+    (DECLARE (FIXNUM I NF))
+    (DO ((J 0 (1+ J)))
+	((= J NF)
+	 (STORE (XGP-FONT-RENAME I) NF)
+	 (STORE (XGP-FONT-NAME NF) (CAR L))
+	 (STORE (FONT-WIDTH-TABLES NF) (GET (CAR L) 'WIDTH))
+	 (STORE (FONT-HEIGHT-TABLE NF) (GET (CAR L) 'HEIGHT))
+	 (STORE (FONT-BASELINE-TABLE NF) (GET (CAR L) 'BASE-LINE))
+	 (SETQ NF (1+ NF)))
+      (DECLARE (FIXNUM J))
+      (COND ((EQ (CAR L) (XGP-FONT-NAME J))
+	     (STORE (XGP-FONT-RENAME I) J)
+	     (RETURN NIL)))))
+  (SETQ XGP-LINE-HEIGHT (+ (FONT-HEIGHT-TABLE 0) XGP-VSP)
+	XGP-BASELINE (FONT-BASELINE-TABLE 0))
+  (PRINC '|/
+;SKIP 1/
+| OUTPUT-FILE)  
+  (PRINC '|;VSP | OUTPUT-FILE)
+  ((LAMBDA (BASE *NOPOINT)
+	   (PRIN1 XGP-VSP OUTPUT-FILE))
+   10. T)
+  (PRINC '|/
+;SQUISH/
+;LFTMAR 0/
+;TOPMAR 0/
+;BOTMAR 0/
+| OUTPUT-FILE)  ;This is needed to make escape 1, subescape 40 work properly.
+  (+TYO 14 OUTPUT-FILE)
+  )
+
+(DEFUN GET-TODAYS-DATE ()
+  ((LAMBDA (DT)
+    ((LAMBDA (YEAR MONTH DAY)
+      (SETQ TODAYS-DATE-STRING
+	    (STRING-APPEND (STRING-NUMBER DAY)
+			   (STRING '-)
+			   (DO ((L '(JAN FEB MAR APR MAY JUN JUL AUG SEP OCT NOV DEC) (CDR L))
+				(N MONTH (1- N)))
+			       ((= N 1) (STRING (CAR L))))
+			   (STRING '-)
+			   (STRING-NUMBER YEAR))))
+     (CAR DT) (CADR DT) (CADDR DT)))
+   (STATUS DATE)))
+
+(DEFUN BARF NARGS
+  (LET ((OF (LIST TYO)))
+   (AND LOG-FILE (SETQ OF (CONS LOG-FILE OF)))
+   (TERPRI OF)
+   (PRINC '|>>ERROR:| OF)
+   (DO I 1 (1+ I) (> I NARGS)
+     (TYO 40 OF)
+     (PRINC (ARG I) OF))
+   (TERPRI OF)
+   (PRINC '|  Decimal file position=| OF)
+   ((LAMBDA (BASE *NOPOINT) (PRIN1 (JIN-ERROR-FILEPOS) OF))
+    10. T)
+   (PRINC '| in | OF)
+   (PRINC INPUT-FILE OF)
+   (AND BARF-STOP-P (BREAK BARF T))))
+
+(DEFUN REQUEST-FINALIZE ()
+  (SETQ INPUT-FILE '||)  ;Don't print something wierd in the page footer
+  (SETQ TABLE-OF-CONTENTS (CONS CHAPTER-TOC-LEADING TABLE-OF-CONTENTS))
+
+  (FRESH-PAGE)
+  (PRINT 'TABLE-OF-CONTENTS)
+  (SETQ PAGE-NUMBER 1) ;Sigh, start over with page 1
+  (OUTPUT-INDEX (NREVERSE TABLE-OF-CONTENTS)
+		'|Table of Contents| 1))

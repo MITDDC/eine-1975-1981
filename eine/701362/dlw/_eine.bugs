@@ -1,0 +1,22 @@
+
+Comment: DLW@MIT-AI 07/28/78 20:13:58
+Comment: *** END OF ORIGINAL HEADER ***
+Date: 07/28/78 20:13:58
+From: DLW@MIT-AI
+
+Self insert loses on continuations again(!)
+
+    
+
+
+
+Comment: moon@MIT-AI (Sent by RG@MIT-AI) 07/29/78 13:16:19
+Comment: *** END OF ORIGINAL HEADER ***
+Date: 07/29/78 13:16:19
+From: moon@MIT-AI
+Sender: RG@MIT-AI
+
+Doing 2 things in a row that use the display
+pc ppr, e.g. meta-X ? count lines CR, in EINE, loses because it homes up for
+the second one but doesn't erase to end of line.
+

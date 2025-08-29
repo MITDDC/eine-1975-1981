@@ -1,0 +1,293 @@
+;;; Edit Files.                           -*-LISP-*-
+
+; Documentation:
+; EDF it a package used to edit whole files.
+
+; Use (EDF "LISPM;FOO >") to read the file and put it into several buffers.
+;    It will tell you what it is doing.  It breaks the file into lots of little buffers
+;      trying to get each function definition into its own buffer with a suitable name.
+;    For things which are not function definitions, it will gensym up a name.
+
+; To write the file back out, use (EDF-WRITE "LISPM;FOO >").   If you want to take
+;    the buffers read in from "LISPM;FOO >" and write them to "LMDOC;BAR >", then you
+;    say (EDF-WRITE "LISPM;FOO >" "LMDOC;BAR >"). [That is, it takes its arguments in
+;    'from, to' order like ITS DDT.]  It tells you the names of the buffers as it writes
+;    them; to make it shut up setq EDF-WRITE to something non-NIL.
+
+; If you have a new buffer which you want to add to the file, use EDF-ADD:
+;    (EDF-ADD "LISPM;FOO >" "FOO-MAIN-LOOP").  The second arg is optional,
+;    and may be either a buffer or a buffer-name.  It defaults to the open
+;    buffer.  Alternatively, use the editor extended-mode command
+;    "ADD BUFFER TO FILE" .
+
+; If you have several buffers already in the editor and want to treat them as
+;    an EDF file, use EDF-DEFINE-FILE:
+;    (EDF-DEFINE-FILE "LMDOC;GOOD STUFF" "FOO-BUFFER" "BAR-BUFFER").  The first
+;    arg is a file name, and the &REST are buffers or buffer names.
+;    (it may be more convenient to just give the file name as the arguemnt,
+;    and then use the "ADD BUFFER TO FILE" command in the editor to actually
+;    define the buffers in the file.
+
+; To find out what is going on, type (EDF-TELL), which gives you a list of filenames
+;    read in.  Also, (EDF-TELL "LISPM;FOO >" will tell you what buffers are 
+;    being remembered as part of the file "LISPM;FOO >".
+
+; Several of these functions ask for confirmation.  If this is too obnoxious, tell
+;    me and I will take it out.
+
+
+; Implementation note:  The data structure used is EDF-ALIST, which is an ASSOC
+;    list associating each filename with a list of buffers.
+
+
+(SETQ EDF '((SET-PROCESS-SWITCH OPEN-CODE-MAP-SWITCH T)
+	    (SET-PROCESS-SWITCH RETAIN-VARIABLE-NAMES-SWITCH 'ARGS)	    
+	    EDF EDF-READ-LIST EDF-YES-OR-NO EDF-WRITE EDF-TELL EDF-ADD
+	    EDF-COM-ADD EDF-DEFINE-FILE EDF-READ-CHAR
+	    (SPECIAL-PROCESSING (LOAD-TIME-SETQ EDF-WRITE 'NIL))
+	    (SPECIAL-PROCESSING (LOAD-TIME-SETQ EDF-ALIST 'NIL))
+	    ))
+
+(SPECIAL EDF-WRITE EDF-ALIST EDF-AREA)
+
+
+;Since this loses for moving BPs, the EOB-BP is patched up later.
+(DEFUN EDF-READ-CHAR (BP STREAM &AUX CHAR TEM)
+    (SETQ CHAR (FUNCALL STREAM 'TYI))
+    (COND ((NULL CHAR))
+	  ((= CHAR 215)
+	   (ED-INSERT-LINE-INTO-OPEN-BUFFER
+	    (ED-CREATE-LINE 'ART-STRING)
+	    (SETQ TEM (ED-BUFFER-FILL-POINTER)))
+	   (SETF (ED-BUFFER-FILL-POINTER) (1+ TEM))
+	   (ED-MOVE-BP BP TEM 0)
+	   )
+	  (T (FILL-ARRAY (ED-BP-LINE BP) CHAR)))
+    CHAR)
+
+(DEFUN EDF-READ-LIST (BP STREAM &AUX CHAR TEM (SLASH-FLAG NIL) (RETURN-FLAG NIL) (LEVEL 0))
+    (PROG ()
+	  ; First find a DEFUN, which is an open paren in column 1.
+	  ;Here we have just seen a NEWLINE.
+  NEWLINE (SETQ CHAR (EDF-READ-CHAR BP STREAM))
+          (OR CHAR (RETURN NIL))
+	  (SELECT (AR-1 ED-LIST-SYNTAX-TABLE CHAR)
+		  (ED-LIST-OPEN       ;This starts a DEFUN, proceed to MAIN1
+		   (SETQ LEVEL (1+ LEVEL))
+		   (GO MAIN1)))
+
+	  ;Here we are skipping over the line, because it doesn't start with a paren.
+    FIND-NEWLINE
+	  (AND (= CHAR 215)	      ;Found!
+	       (GO NEWLINE))
+          (SETQ CHAR (EDF-READ-CHAR BP STREAM))
+	  (OR CHAR (RETURN NIL))
+	  (GO FIND-NEWLINE)
+
+	  ; Now that we are in a defun, do a forward-over-list.
+    MAIN1 (SETQ SLASH-FLAG NIL)
+    MAIN  (SETQ CHAR (EDF-READ-CHAR BP STREAM))
+          (OR CHAR (RETURN NIL))
+	  (AND SLASH-FLAG (GO MAIN1))
+
+	  (SELECT (AR-1 ED-LIST-SYNTAX-TABLE CHAR)
+		  (ED-LIST-CLOSE
+		   (SETQ LEVEL (1- LEVEL))
+		   (AND (<= LEVEL 0)
+			(GO FINISH)))
+		  (ED-LIST-OPEN
+		   (SETQ LEVEL (1+ LEVEL)))
+		  (ED-LIST-DOUBLE-QUOTE
+		   (GO STRING))
+		  (ED-LIST-SLASH
+		   (SETQ SLASH-FLAG T)))
+	  (GO MAIN)
+
+
+  STRING1 (SETQ SLASH-FLAG NIL)  
+   STRING (SETQ CHAR (EDF-READ-CHAR BP STREAM))
+	  (OR CHAR (RETURN NIL))
+	  (AND SLASH-FLAG (GO STRING1))
+
+	  (SELECT (AR-1 ED-LIST-SYNTAX-TABLE CHAR)
+		  (ED-LIST-DOUBLE-QUOTE
+		   (GO MAIN))
+		  (ED-LIST-SLASH
+		   (SETQ SLASH-FLAG T)))
+	  (GO STRING)
+
+	  ; Finally have read in whole list, now get the rest of the line.
+   FINISH (SETQ CHAR (EDF-READ-CHAR BP STREAM))
+          (COND ((OR (NULL CHAR)
+		     (= CHAR 215))
+		 (RETURN T)))
+	  (GO FINISH)
+	  ))
+
+(DEFUN EDF (FILENAME &AUX (ED-INTERACTIVE-P NIL) TEM BP WINP MOREP NAME BUFFER-LIST STREAM
+		     SUBSTRING)
+    (OR (BOUNDP 'ED-RANDOM-AREA) (ED-INITIALIZE))
+    (COND ((NOT (BOUNDP 'EDF-AREA))
+	   (DEFINE-AREA 'EDF-AREA 300000)))
+    (OR (BOUNDP 'EDF-ALIST)
+	(SETQ EDF-ALIST NIL))
+    (SETQ STREAM (OPEN FILENAME '(READ)))
+    (SETQ MOREP T)
+    (TERPRI) (PRINC "Reading in the following buffers:") (TERPRI)
+    (SETQ BUFFER-LIST NIL)
+    (DO () (())
+	((LAMBDA (ED-BUFFER-AREA)
+		 (SETQ ED-OPEN-BUFFER (ED-CREATE-BUFFER T 10000)))
+	 EDF-AREA)
+	(SETQ BP (ED-BUFFER-POINT))
+	(SETQ MOREP (EDF-READ-LIST BP STREAM))
+	(COND ((NOT MOREP)
+	       (RETURN-ARRAY ED-OPEN-BUFFER)
+	       (SETQ ED-OPEN-BUFFER NIL)
+	       (RETURN T)))
+	(SETQ BUFFER-LIST (CONS ED-OPEN-BUFFER BUFFER-LIST))
+	(ADJUST-ARRAY-SIZE ED-OPEN-BUFFER (MAX (+ 30 (ED-BP-LINE-NUM BP))
+					       100))
+	(SETQ TEM (%ARRAY-ACTIVE-INDEX-LENGTH (ED-BP-LINE BP)))
+	(ED-MOVE-BP (ED-BUFFER-EOB-BP)
+		    (1- (ED-BUFFER-FILL-POINTER))
+		    TEM)
+
+	(SETF (ED-BP-CHAR-POS BP) TEM)
+	(MULTIPLE-VALUE (BP WINP)
+			(ED-BACKWARD-LIST-BP BP 1))
+	(SETQ SUBSTRING (ED-SUBSTRING (ED-BP-LINE BP) 0 4))
+	(OR (AND WINP
+		 (>= (%ARRAY-ACTIVE-INDEX-LENGTH (ED-BP-LINE BP)) 6)
+		 (OR (STRING-EQUAL SUBSTRING "(DEF")
+		     (STRING-EQUAL SUBSTRING "(MAC")
+		     (STRING-EQUAL SUBSTRING "(def")
+		     (STRING-EQUAL SUBSTRING "(mac")))
+	    (GO LOSE))
+	(SETF (ED-BP-CHAR-POS BP) 1) ;MOVE OVER OPEN PAREN
+	(MULTIPLE-VALUE (BP WINP)
+			(ED-FORWARD-SEXP-BP BP 2))
+	(OR WINP (GO LOSE))
+	(SETQ TEM (ED-BACKWARD-SEXP-BP BP 1))
+	(ED-SET-BUFFER-NAME ED-OPEN-BUFFER
+			    (SETQ NAME (ED-COPY-STRING
+					(ED-SUBSTRING (ED-BP-LINE BP)
+						      (ED-BP-CHAR-POS TEM)
+						      (ED-BP-CHAR-POS BP)))))
+	(SETQ NAME (INTERN NAME))
+	(PUTPROP NAME ED-OPEN-BUFFER 'ED-READ-IN-BUFFER)
+	(GO DONE)
+   LOSE (ED-SET-BUFFER-NAME ED-OPEN-BUFFER
+			    (SETQ NAME (FORMAT-STRING NIL "BUFFER-~D"
+						      (SETQ ED-BUFFER-GENSYM-COUNTER
+							    (1+ ED-BUFFER-GENSYM-COUNTER)))))
+   DONE (PRINC (ED-BUFFER-NAME ED-OPEN-BUFFER)) (TERPRI)
+        (ED-MOVE-POINT 0 0))
+    (CLOSE STREAM)
+    (SETQ EDF-ALIST
+	  (CONS (CONS FILENAME (NREVERSE BUFFER-LIST))
+		EDF-ALIST))
+    NIL)
+
+
+(DEFUN EDF-YES-OR-NO (&OPTIONAL (STREAM PRINT-DEFAULT-OUTPUT-DESTINATION) &AUX CH)
+    (SETQ CH (KBD-TYI))
+    (COND ((MEMQ CH '(131 171 124 164 40))
+	   (PRINC "Yes.")
+	   T)
+	  (T
+	   (PRINC "No.")
+	   NIL)))
+
+(DEFUN EDF-WRITE (FILENAME &OPTIONAL (FILENAME1 FILENAME) &AUX BUFFER-LIST OK-P STREAM)
+    (SETQ BUFFER-LIST (ASSOC FILENAME EDF-ALIST))
+    (OR BUFFER-LIST (ERROR "No such file on EDF-ALIST -- EDF-WRITE"))
+    (COND ((NOT (STRING-EQUAL FILENAME FILENAME1))
+	   (FORMAT-STRING 'CONSOLE-IO 
+		   "~%Write out buffers read in as ~A as filename ~A?"
+		   FILENAME FILENAME1))
+	  (T (SETQ OK-P T)))
+    (COND ((AND (NULL OK-P)
+		(NULL (EDF-YES-OR-NO)))
+	   (PRINC "OK, forget it then.")
+	   NIL)
+	  (T
+	   (SETQ STREAM (OPEN FILENAME1 '(WRITE)))
+	   (TERPRI)
+	   (DO L (CDR BUFFER-LIST) (CDR L) (NULL L)
+	     (COND ((NULL EDF-WRITE)
+		    (PRINC "Writing buffer ")
+		    (PRINC (ED-BUFFER-NAME (CAR L)))
+		    (TERPRI)))
+	     (SETQ ED-OPEN-BUFFER (CAR L))
+	     (FUNCALL (ED-BUFFER-POINT-STREAM) 'INITIALIZE)
+	     (:COPY (ED-BUFFER-POINT-STREAM) STREAM))
+	   (CLOSE STREAM)
+	   T)))
+
+(DEFUN EDF-TELL (&OPTIONAL FILENAME TEM)
+    (TERPRI)
+    (COND ((NOT (STRINGP FILENAME))
+	   (PRINC "The following files have been read in:") (TERPRI)
+	   (DO L EDF-ALIST (CDR L) (NULL L)
+	     (PRIN1 (CAAR L)) (TERPRI))
+	   T)
+	  (T
+	   (SETQ TEM (ASSOC FILENAME EDF-ALIST))
+	   (PRINC "The file ") (PRIN1 FILENAME)
+	   (COND ((NULL TEM)
+		  (PRINC " is not on EDF-ALIST at all.") (TERPRI)
+		  NIL)
+		 (T
+		  (PRINC " includes the following buffers:")
+		  (DO L (CDR TEM) (CDR L) (NULL L)
+		    (PRINT (ED-BUFFER-NAME (CAR L))))
+		  (TERPRI)
+		  T)))))
+
+(DEFUN EDF-ADD (FILENAME &OPTIONAL (BUFFER ED-OPEN-BUFFER) &AUX NAME TEM LIST)
+    (COND ((STRINGP BUFFER)
+	   (SETQ TEM (ASSOC BUFFER ED-BUFFER-ALIST))
+	   (OR TEM (ERROR "No such buffer -- EDF-ADD" BUFFER))
+	   (SETQ BUFFER (CDR TEM))))
+    (SETQ TEM (ASSOC FILENAME EDF-ALIST))
+    (OR TEM (ERROR "No such file -- EDF-ADD" FILENAME))
+    (FORMAT-STRING NIL "Add buffer ~A to file ~A?" (ED-BUFFER-NAME BUFFER) FILENAME)
+    (COND ((EDF-YES-OR-NO)
+	   (NCONC TEM (NCONS BUFFER))
+	   (PRINC "Added.")
+	   T)
+	  (T
+	   (PRINC "OK, forget it then.")
+	   NIL)))
+
+(DEFUN EDF-COM-ADD (CHR &AUX TEM)
+    ((LAMBDA (ED-MODE-LINE-LIST ED-RANDOM-MODE)
+	     (ED-UPDATE-MODE-LINE)
+	     (TV-SET-CURSORPOS ED-STATUS-PC-PPR 0 (PC-PPR-LINE-HEIGHT ED-STATUS-PC-PPR))
+	     (SETQ TEM (ED-TOPS20-READER ED-STATUS-PC-PPR EDF-ALIST))
+	     (OR TEM (ED-BARF))
+	     (NCONC TEM (NCONS ED-OPEN-BUFFER))
+	     )
+     ED-RANDOM-MODE-LIST
+     "Add this buffer to file:")
+    (SETQ ED-REDISPLAY-LOSES T)
+    ED-DIS-NONE)
+
+(DEFUN EDF-DEFINE-FILE (FILENAME &REST BUFFERS &AUX TEM)
+    (COND ((ASSOC FILENAME EDF-ALIST)
+	   (ERROR "File already exists -- EDF-DEFINE-FILE" FILENAME)))
+    (SETQ EDF-ALIST
+	  (CONS
+	   (CONS FILENAME
+		 (MAPC
+		  (FUNCTION (LAMBDA (B)
+				    (COND ((STRINGP B)
+					   (SETQ TEM (ASSOC B ED-BUFFER-ALIST))
+					   (OR TEM (ERROR "No such buffer -- EDF-ADD" B))
+					   (CDR B))
+					  (T B))))
+		  BUFFERS))
+	   EDF-ALIST))
+    T)
+

@@ -1,0 +1,111 @@
+EINE Internal Documentation				DLW 11/4/77 -*-Fundamental-*-
+
+
+This file contains documentation on internal formats used in EINE, the Lisp
+Machine editor.
+
+Structures used for file manipulation.
+
+	When editing a file of Lisp code on the Lisp Machine, EINE
+breaks the file into "sections",
+each of which has a name.  Each section is put into an EINE buffer. 
+Mostly the file is broken automatically, with one Lisp DEFUN being put
+into each buffer.  The name of such a section is the name of the
+function defined.  (The "defining function" may be DEFUN, MACRO,
+DEFMACRO, DEFSTRUCT, etc.).  However, the user may explicitly
+control the breaking into sections by putting lines 
+(BEGF FOO)
+and
+(ENDF FOO)
+around the text, which will cause all surrounded text, as well as the
+BEGF and ENDF, to be put into a section called FOO.
+
+	Usually, the name of the buffer in which a section resides is the
+same as the name of the section.  Buffer names are usually unique in EINE.
+But, there are certain section names which may be seen in more than one file.
+Specifically, "HEAD" and "TAIL" (this list may be expanded some time) are recognized
+by EINE as being per-file type things.  So when EINE creates the buffer to hold
+the section called "HEAD" of the file LISPM2;EDFN >, it will not name it "HEAD",
+but rather "HEAD-EDFN->-DSK:-LISPM2;", so that when selecting a buffer you
+can easily specify whose HEAD you want.  The list of such names is
+ED-SPECIAL-SECTION-LIST.
+
+(Special notes:
+   1) If an (ENDF FOO) is seen before any BEGF's, EINE acts as if there were a matching
+		BEGF at the beginning of the file.  Similarly, if there is an open
+		(BEGF BAR) when the end of the file is reached, EINE acts as if there were
+		a matching (ENDF BAR).  This is most ofter used for HEAD and TAIL.
+   2) HEAD is also known about specially; if you compile something in the file, and
+		there is a HEAD for that file, the HEAD will get compiled first (if
+		it has not been already).  This way, declarations that are needed
+		throughout the file need only be put in the HEAD, which is where you would
+		probably put them anyway.
+)
+======================================================================
+
+Internal data structure:
+
+1) For each file which we are hacking, there is a symbol whose
+print-name is the fully defaulted filename (including spaces);
+that is, (INTERN "DSK: LISPM2; EDFN >").  These are called
+FILE SYMBOLS.
+
+2) ED-FILE-LIST is a list of all the file symbols.
+
+3) An editor buffer is a named structure.  It is an ART-Q array
+whose elements are LINEs (q. v.) and whose array leader contains
+among other things the ED-BUFFER-NAME entry.
+
+4) The ED-BUFFER-NAME of a buffer is a symbol called the BUFFER
+NAME.  Every buffer name has an ED-BUFFER property, which is the buffer.
+(The relationship between buffers and buffer names is one-to-one onto.
+The named-structure-function of the buffer will print out the print-name
+of the buffer name, unsurprisingly.)  Often the buffer name will be the same
+as the name of the function whose definition is read into that buffer,
+(if any), but it need not be.
+
+5) For any name of any section used by anyone there is a symbol
+called the SECTION NAME.  (Often these look a lot like buffer names,
+but not in the case of HEAD).
+
+6) Each file symbol has an ED-FILE-SECTION-ALIST property.  The elements of the
+list are (<section name> . <buffer name>) .  That is, it is an assq-list
+which, given any section name of a section in the file, tells you the
+buffer name/buffer which that section is read into.
+
+7) Each buffer name has an ED-RANGE property, which is NIL for a newly created
+function, else (START SIZE) giving the range in characters which the function
+occupied in the file from which is was read in.
+
+8) Each buffer name has an ED-TICK property, which is the value of ED-TICK at the
+last time the function was read from or written to the disk.
+
+9) Each buffer name has an ED-FILE-ID property, which is a string containing
+the file version, date, time, and size when the function was read in, or NIL
+for a newly created function.
+
+10) The value of ED-BUFFER-ALIST is a list, each of whose elements
+is a cons of (<buffer name> . <its corresponding buffer>).
+This is used for the COMPLETING-READER.  Not every buffer need be on this;
+specific system buffers or buffers with no names may not be (specifically
+the mini-buffer and the stuff on the kill ring.)
+
+11) Each file has an ED-HEAD-EVALLED property which is the ED-TICK as of the last
+time the file's HEAD was evaluated.  Updating the file when the HEAD has been
+changed flushes the property so that the new HEAD will be evaluated.
+
+12) Each buffer name has an ED-READ-IN-FILE property, which is the file symbol
+of the file from which its contents were read in.
+
+13) Any function name may have an ED-DEFINING-FILE-NAME property, which is
+a file symbol from which the function should be fetched if anyone ever
+asks for it.  These are created by reading in a TAG table.
+
+14) ED-TAG-FILE-LIST is a list of file symbols for every tag table
+read in.
+
+Points 3, 4, and 10 are true whether or not the EDFN stuff is being used.
+However, for temporary buffers such as those which live on the kill ring,
+there is no buffer name at all.
+ED-BUFFER-NAME-PROPERTIES is a list of all of these properties which
+buffer names may have.

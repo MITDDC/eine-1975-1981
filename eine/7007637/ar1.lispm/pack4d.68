@@ -1,0 +1,1119 @@
+Documentation on PACK4.			ALAN, DLW 1/13/78 -*-Fundamental-*-
+Revised to version 4.3 by ALAN and DLW, as of 1/25/78.
+
+>> Introduction.
+
+	This is an internal note describing how PACK4, the latest version
+(as of this date) of the Lisp Machine package system, works.
+
+	CAVEAT LECTOR: This is NOT FINISHED.  Gross changes are still
+being made.  If you read it now, you may have to read it again when we
+redesign everything.  So don't say you weren't warned. 
+
+	The package feature has, in general, been found confusing.  If
+there are any points of inclarity or forward reference, or if the
+motivations for anything are left unclear by the end of the document,
+please inform us and we will try to fix it.  Also, any suggestions will
+be listened to and thought about.
+
+	READFILE refers to any program whose purpose it is to read in
+a program written in Lisp from an ASCII file so that it may be
+executed in the Lisp environment.  FASLOAD, similarly, refers to any
+program which does the same things for a binary QFASL file.  FASDUMP
+is the program which writes out QFASL files, and PRINT is just the
+Lisp printer.
+
+	INTERN is almost always thought of as a function which takes
+a string, and returns some symbol whose print-name is that string.
+
+	[Square brackets contain comments comparing this scheme to
+the dynamic linking scheme of Multics.]
+
+	{Braces contain questionable side comments and such.}
+
+Contents:
+
+>> Introduction.
+Chapter 1: The basic package system.
+>> The Need for Multiple Contexts.
+>> The Implementation of Name Spaces.
+>> The Hierarchical Structure of Obarrays.
+>> Shared Programs.
+>> Sub-Packages.
+Chapter 2: Addition features.
+>> Multiple Instantiations of a Program.
+>> Translations.
+>> Shadowing.
+>> External Symbols:
+>> The FASLOAD Warning Feature.
+>> Keywords.
+>> Printing.
+Chapter 3: Loading and Associated Mechanisms.
+>> Using the Lisp Machine.
+>> Introduction to loading.
+
+*******************************
+********** CHAPTER I **********
+*******************************
+
+>> The Need for Multiple Contexts.
+
+	A Lisp program is a collection of function definitions.
+The functions are known by their names, and so each must have its
+own name to identify it.  Clearly a programmer must not use the same
+name for two different functions.
+
+	The Lisp Machine environment consists of a Lisp world, with a
+great number of functions initially existing.  All of the "operating
+system" and the "utilities" are Lisp functions, each with its own
+name.  Further, many programs are generally "loaded" and living in
+that Lisp environment.  All of these functions, it would seem, must
+have different names.  Many people participate in the writing of
+these programs, and to expect no two of them to ever use (or want to
+use) the same name would be ridiculous.  Similarly, many very large
+programs (such as MACSYMA) are written by a large number of people,
+who cannot be expected to keep up with each other's function names to
+avoid nameing conflicts. {I realize that they have managed to win so
+far, but that doesn't change the fact that their present conditions
+are not really reasonable.}
+
+	Here is an example: suppose there are two programs named CHAOS
+and ARPA, for handling the ChaosNet and ArpaNet respectively.  The
+author of each program wants to have a function called GET-PACKET,
+which reads in a packet from the network (or something).  Also, each
+wants to have a function called ALLOCATE-PBUF, which allocates the
+packet buffer.  Each "get" routine first allocates a packer buffer,
+and then reads bits into the buffer; therefore, each version of GET-PACKET
+should call the respective version of ALLOCATE-PBUF.
+
+	Here I will introduce some terminology.  A CONTEXT is a
+mapping from names to things: in a given context, there are a set of
+names, each of which corresponds to a different thing.  For example, a
+directory in a file system is a context which mapes filenames into
+files.  The typical file system has many directories, so that two users
+may have files with the same names (among other reasons).  In Lisp,
+a kind of context often used is the OBARRAY, which maps names into symbols.
+Various kinds of contexts can be found all over computer science
+{See the reference on naming}.
+
+	The purpose of the package system is to provide several
+different contexts withing a Lisp world, as opposed to the usual
+one context.  These contexts, which map names into symbols, are
+called NAME SPACEs.  In the above example, the important point is
+that the two programs, when loaded together, must have different
+name spaces; they cannot both use the same name space.  Creating,
+organizing and maintaining name spaces is what the package system is
+all about.
+
+	So as we walk up to our hypothetical Lisp Machine, there are at least two
+name spaces in the Lisp world: one for CHAOS and one for ARPA. When CHAOS
+was read into the machine (by READFILE or FASLOAD), symbols were interned
+"with respect to" the CHAOS name space, in some sense.  When CHAOS's
+GET-PACKET referred to ALLOCATE-PBUF, the ALLOCATE-PBUF in the CHAOS
+name space was found, and so the functional object for GET-PACKET
+"knows about" (i.e. points to) the correct symbol named ALLOCATE-PBUF,
+whose function cell contains the CHAOS ALLOCATE-PBUF fef.
+
+>> How Lisp Works.
+
+	Before reading further, the reader must understand how Lisp naming
+fundamentally works.  Before a program can be run, it must be LOADed, either
+by READing or FASLOADing.  Both of these take bits from somewhere (ASCII text
+or binary "fasl" format files), and create list structure based on it.  Both
+call the function INTERN, which takes a CHARACTER STRING and returns a SYMBOL.
+It is important to understand that this mechanism; if you don't, read the
+"Notes on the Lisp Language" by Bernie Greenberg.
+
+>> The Implementation of Name Spaces.
+
+	The important question is: how do we implement name spaces?
+One possibility would be for every name space to be its own obarray.
+However, this has seveal problems.  First, the names space of CHAOS
+(for example) must include every Lisp system function; the programmer
+must be allowed to use the functions CAR and CONS and APPEND without
+any kind of special arrangement.  The Lisp Machine's "hard-core"
+system is immense; it is even bigger than Maclisp's.  The single
+obarray needed would be huge, and so the cost of setting up a new name
+space would likewise be considered huge.  In fact, name spaces are a
+very convenient thing, and we would like to keep their cost reasonably
+low so that programmers could use them to their full advantege.
+Secondly, as we will see below, the system described in this document
+provides the very important feature of "sharing of programs", in an
+elegant way, which would be difficult to implement in a scheme in
+which every name space were implemented as a single obarray.
+
+	Instead, we would like to share the immense core system between
+the two name spaces.  There should only be one huge obarray containing
+the system functions, and that obarray should be shared between the two
+name spaces.  We thus implement a name space as a linear sequence of
+obarrays.  The CHAOS name space would have two obarrays: the first
+one would contain the symbols ALLOCATE-PKBUF and GET-PACKET, and the
+second would contain CAR and CDR and be shared with other name spaces.
+
+	We will give every obarray a name, which is a string.  The
+reasons for the name will become clear soon.  Suppose the system function
+obarray were called SYSTEM, and the CHAOS program's CHAOS, and the ARPA
+program's ARPA.  So we could describe the name space of the CHAOS
+program as (CHAOS SYSTEM), and the ARPA name space as (ARPA SYSTEM).
+
+	When CHAOS is read into the Lisp world, its symbols
+will get interned.  The way interning would work is that INTERN
+would search for the string (which it was given as its argument)
+in sucessive obarrays, starting with CHAOS and proceeding up the
+sequence of obarrays in the name space.  If it finds such a string
+in any obarray along the way, it returns the corresponding symbol.
+Otherwise, it would install that (name,symbol) pair on the first
+obarray of the name space.  (In various places, we will refer to 
+interning as "resolving references".)
+
+	So when CHAOS is read into its name space, its references
+to CAR are resolved by giving it the regular symbol CAR, which INTERN
+would find on the SYSTEM obarray.  The first time GET-PACKET were mentioned,
+INTERN would not find it anywhere, and so would install that string,
+with a newly created symbol, on the CHAOS obarray.  Any further reference
+to GET-PACKET would be resolved by that symbol on the CHAOS obarray.
+
+	When the ARPA package were subsequently read in, the name
+space would be set up as (ARPA SYSTEM).  Thus, the first time ARPA
+referred to GET-PACKET, the CHAOS one would not be found; a new
+one would be created, and installed on the ARPA obarray.  This is the
+desired effect.  Both programs would be loaded, and there would be
+no problems due to name conflicts, because of the multiple name spaces.
+
+>> The Hierarchical Structure of Obarrays.
+
+	Now, it would be conceiveable to allow a given name space
+to consist of any ordered sequence of obarrays in the entire
+Lisp world.  {In fact, PACK2 does just this.}  However, a good
+deal of confusion would be caused.  If program A had FOO in his
+name space followed by BAR, and program B had BAR followed by FOO,
+some very non-intuitve things would happen.  {I hope I don't have
+to elaborate on why this is.}
+
+	So, the package system enforces a rule about how name spaces
+can be organized.  Obarrays are thought of as being in a  hierarchical
+structure.  Any obarray FOO has one DADDY-OBARRAY, namely BAR, and
+name space sequences are formed of the DADDY-OBARRAY chains.  (The exception
+is the SYSTEM obarray which sits at the top of the hierarchy: it has
+no parent, so its DADDY-OBARRAY is NIL.)
+
+	A picture of the hierarchy described in the network example
+above would look like:
+
+                    SYSTEM
+                       |
+          /----------------------------\
+          |                            |
+        CHAOS                         ARPA
+
+	Note that with the hierarchical arrangement, every obarrays
+specifies a certain name space.  For example, the CHAOS obarray
+specifies the name space (CHAOS SYSTEM).  This way, we need not give
+names to name spaces or anything like that.  We sometimes call the
+first obarray of a name space (i.e., the obarray which designates that
+name space) the BASE OBARRAY of the name space. 
+
+>> Shared Programs.
+
+	Now, a very important feature of the Lisp machine is that of
+"shared programs"; if one person writes a function to, say, print
+numbers in Roman numerals, any other function can call it to print
+Roman numerals.  This contrasts sharply with PDP-10 system programs,
+in which Roman numerals have been independently reimplemented several
+times (and the ITS filename parser several dozen times).  [Multics is
+one system which solves this problem of sharing of code.] {Copying
+(a la .INSRT) doesn't count as sharing.}
+
+	For example, the routines to manipulate a robot arm might be
+separate program called ARM, and its functions would be in its own
+name space.  If we have a second program called BLOCKS (the blocks
+world, of course) which wanted to manipulate the arm, it would want to
+call functions which are defined on the ARM obarray, and therefore not
+in BLOCKS's own name space. 
+
+	The waythe package system provides a means for this is by a
+special modification to INTERN.  INTERN checks the string it is given
+for a special character, {which, for the purposes of this paper will
+be called "$". [The analogy with Multics is intentional, and will be
+expounded upon later.]}.  The way BLOCKS would call a function named
+GO-UP defined in ARM would be by asking to call ARM$GO-UP.  What this
+means precisely is "The symbol named GO-UP in the name space of the
+obarray ARM."  The string "GO-UP" will be interned in the name space
+of the ARM program. 
+
+	Similarly, if the CHAOS program wanted to refer to the ARPA
+program's ALLOCATE-PBUF function (for some reason), it would simply
+call ARPA$ALLOCATE-PBUF.
+
+	Now we see what the names of the obarrays are used for. 
+Somewhere there is an association of names of programs with their
+respective obarrays.  Before explaining the exact mechanism involved
+here, we must first consider the problem of huge programs. 
+
+	A further note on sharing:  the original version of the package
+system (one obarray per name-space) was going to implement this accessing
+by having every externally-callable entrypoint be "extened" and placed
+in every name space in the system.  However, this does not do anything
+to prevent name conflicts for the externed symbols; and in the case of
+the CHAOS program, nearly every function would have to be so externed,
+and thus be subject to all kinds of name conflicts.
+
+>> Sub-Packages.
+
+	Large programs, such as MACSYMA, are usually made up of a
+number of sub-programs, each of which is maintained by a small number
+of people.  We would like each sub-program to have its own name space,
+since the program as a whole has too many names for anyone to
+remember.  So, we make up a specific obarray for each sub-program.
+
+	However, it is likely that there will be a fair number of functions
+and symbols which are shared by all of the sub-programs of MACSYMA.
+The way we would set it up is to have an obarray named
+MACSYMA, whose DADDY-OBARRAY would be SYSTEM.  Then, each of the
+sub-programs (which might be called SIN, RISCH, INPUT, and so on)
+would have its own obarray, with the MACSYMA packages as its DADDY-OBARRAY.
+This way, each sub-program gets its own name space.
+
+	To demonstrate the full power and convenience {i.e. winnitude}
+of this scheme, suppose there were a second huge program called OWL
+which also had a subprogram called INPUT (which, presumably, does all
+of the INPUTting for OWL), and one called DATABASE.  Then a picture of
+the hierarchy of obarrays would look like this:
+
+			SYSTEM
+			   |
+		/--------------------------------\
+		|                                |
+	     MACSYMA		                OWL
+		|                                |
+ -----------------------------           -------------------------
+  | | |      |       |       |           |         |         | | |
+(others)   RISCH    SIN    INPUT       INPUT   DATABASE      (others)
+
+(Probably there would be more subprograms; this is a partial figure)
+
+	Now, the RISCH program and the SIN program both do
+intergration, and so it would be natural for each to have a function
+called INTEGRATE.  From inside SIN, SIN's INTEGRATE would be referred
+to as "INTEGRATE" (no prefix needed), which RISCH's would be referred
+to as "RISCH$INTEGRATE".  Similarly, from inside RISCH, RISCH's own
+INTEGRATE would be called "INTEGRATE", wheras SIN's would be referred
+to as "SIN$INTEGRATE".
+
+	If SIN's INTEGRATE were a recursive function, the implementor would
+be referring to it from within SIN itself, and would be happy that he
+need not type out "SIN$INTEGRATE" every time; he can just say "INTEGRATE".
+{As opposed to previous PACK2 schemata, in which that symbol would be
+getting put in other people's search rules and have to have a name like
+SIN-INTEGRATE in order to not conflict with the RISCH one.}
+
+	From inside the MACSYMA obarray or any of its other
+sub-obarrays, the two functions would be referred to as
+"SIN$INTEGRATE" and as "RISCH$INTEGRATE".  {Doesn't that sound like
+the right thing?}  From anywere else in the hierarchy, they would have
+to be called "MACSYMA$SIN$INTEGRATE" and "MACSYMA$RISCH$INTEGRATE". 
+Those are somewhat clumsy, but it is not very likely that anyone
+anywhere else in the hierarchy ever WOULD want to refer to either of
+them.  After all, the only reason that they are in sub-programs is
+because they depend on all of those special variables and functions of
+MACSYMA, and they aren't much good without all of them; if SIN and
+RISCH didn't depend on the rest of MACSYMA that way, we might consider
+putting their obarrays directly under SYSTEM; then they would be easy
+to reference. 
+
+	Similarly, assume that each of the INPUT packages has a
+function called GET-LINE.  From inside MACSYMA or any of MACSYMA's
+subprograms (other than INPUT), the relevant function would be called
+INPUT$GET-LINE, and the irrelevant one OWL$INPUT$GET-LINE.  The converse
+is true for OWL and its sub-programs.  Note that there is no problem
+arising from the fact that both OWL and MACSYMA have subprograms of
+the same name (INPUT).
+
+	Now we can see where the association from <names of obarrays>
+to <obarrays themselves> must be kept.  Each obarray has a REFNAME-ALIST.
+The REFNAME-ALIST is a little context by itself, associateing names
+of obarrays to obarrays.  In the above example, SYSTEM's REFNAME-ALIST
+will have entries for the names "MACSYMA" and "OWL"; MACSYMA's will
+have entries for the names "RISCH", "SIN", and "INPUT"; and OWL
+will have entries for the names "INPUT" and "DATABASE" (among others).
+(So far, we are only putting an obarray's direct inferiors on its
+REFNAME-ALIST, although later we will put other things there.)
+
+
+	So here, in Lisp (assuming the presence of various support
+functions), is the algorithm for INTERN.  ARG is a string, which may
+contain dollar signs.  FLAG tells INTERN what to do if it doesn't find
+any corresponding symbol; for the usual Maclisp INTERN, it would be
+"NORMAL".  There are two steps: first, use the "$" prefix information
+to find a "base obarray" which specifies a certain name space; second,
+INTERN the string within that name space, i.e. by looking up the chain
+of DADDY-OBARRAYs.  
+
+	The first "do" locates the proper name space; when it is
+done, BASEOB is bound to the base obarray of the target name space.
+Then, the second "do" interns the string within that name space.
+
+(defun intern (ARG FLAG &aux ANSWER)
+    (do ((BASEOB OBARRAY (cdr (assoc (before-dollar NAME) (refname-alist BASEOB))))
+	 (NAME ARG (after-dollar NAME)))
+	((not (contains-a-dollar NAME))
+	 ;; Now we have found the "base obarray".
+	 ;; Search up the parent chain.
+	 (do ((OB BASEOB (daddy-obarray OB)))
+	     ((null OB)
+	      ;; We didn't find it anywhere.  Now look at the FLAG.
+	      (selectq FLAG
+		 (normal (install (make-symbol NAME) BASEOB))
+		 (error (error "Failed to find symbol" ARG))
+		 (soft (return NIL))))
+	   ;; Body of the inner "do": search for the name in OB.
+	   (and (setq ANSWER (hash-lookup NAME OB))
+		(return ANSWER))))))
+
+	Make sure you understand this; the INTERN algorithm is
+the heart of what is going on in the package system.
+
+********************************
+********** CHAPTER II **********
+********************************
+
+This chapter concerns itself with some additional things 
+the package system can do for you, and the changes which were
+added to it in order to make these things possble.  
+
+>> Multiple Instantiations of a Program.
+
+	Suppose the maintainer of EINE (the Lisp Machine editor) has
+made some changes to EINE, and would like to debug them.  He has a
+problem: if he reads in the new version, which presumably may be full
+of bugs, then he will not be able to do any editing!  This would be
+annoying, since the editor is very useful.
+
+	We would like both the regular and the experimental versions
+of the editor to BOTH be loaded into the Lisp world.  In order to
+accomplish this, we create a second name space for the new one.  This
+will entail the crateing of a new base obarray, which must have a
+different name from the obarray in which the regular editor lives. 
+Suppose the editor normally has a obarray called EINE.  Then we would
+want to say "Load in the file LISPM2;EINE QFASL, but name its base
+obaary TEST-EINE instead of EINE."
+
+	Well, there is nothing too difficult about this.  The READFILE
+and FASLOAD programs will just take another argument {or whatever}
+which specifies the name of the obarray to create.  After the new
+intance of the program is loaded, its functions can be referred to by
+names such as TEST-EINE$ED and TEST-EINE$INSERT-CHARS. 
+
+>> Translations.
+
+	Suppose someone has written a program called DP {Dissociated
+Press} which needs pseudo-random numbers.  Rather than writing his own
+random number generator, the author will have written an external
+call, such as RANDOM$NUMBER or something.  Elsewhere a program called
+RANDOM would exist, which would contain a function called NUMBER which
+returned a random number.  This is just the basic use of the package
+system.
+
+	Now, suppose we have written a new random number generator
+program called NEWRND, and we would like to give it a real test by
+seeing whether DP works when using our program to generate its random
+numbers.  However, we don't want to redefine the symbol RANDOM$NUMBER,
+because we don't want to break any other programs which use the RANDOM
+program.  Instead, what we want to is to cause the reference within DP
+to "RANDOM$NUMBER" to be "resolved" by our symbol NEWRND$NUMBER. 
+
+	Well, the resolution of external references happens at the
+time that the "RANDOM$NUMBER" is given to INTERN; that is, at the time
+the DP program is read in (i.e. loaded).  So what we must do is to
+read in another copy of DP, and cause its external references to be
+resolved in a different way.  Note that since we are reading in a
+second instance of the DP program, we would call it something else,
+e.g.  TEST-DP (see MULTIPLE INSTANTIATIONS OF PROGRAMS above).  (The
+above assumes that DP was already loaded once.  We could also read in
+the very first instance of DP, and tell it to use NEWRND instead of
+RANDOM.  However, we concentrate on the case in which ther is already
+a DP and a new one is needed, because it is more common, and is more
+general.  The same mechanism will work just as well if DP has not been
+read in yet.)
+
+	How do we cause the new instance of DP to have its external
+references resolved in this way?  Well, we give some extra information
+to READFILE or FASLOAD.  We say: "Whenever you see someone referring
+to the "RANDOM" program, give him NEWRND's name space instead."  We
+call this a "translation".  The way READFILE or FASLOAD cause the
+translation to occur is by adding an entry to the REFNAME-ALIST of the
+TEST-DP obarray when that obarray is created. I.e., READFILE will
+create an obarray named TEST-DP (whose DADDY-OBARRAY is SYSTEM), add
+an entry to that obarray's REFNAME-ALIST associateing "RANDOM" to the
+NEWRND name space, and then proceed to read in the DP program into the
+new name space.  The setup of the REFNAME-ALISTs is as follows: SYSTEM
+has entries for "DP" (to the regular version of DP), "RANDOM" (to the
+regular version of RANDOM), "NEWRND" (to the regular version of
+NEWRND), and "TEST-DP" (to the experimenatl version of DP).  "TEST-DP"
+has an entry for "RANDOM" to the regular version of NEWRND.  As we
+see, both SYSTEM and TEST-DP have entries for the string "RANDOM"; if
+you study the algorithm presented above for INTERN, you will see that
+the entry on TEST-DP's REFNAME-ALIST is seen first.
+
+                        SYSTEM
+                           |
+          /--------------------------------\
+          |          |          |          |
+        RANDOM  <=  DP        TEST-DP  => NEWRND
+
+	(The "=>" and "<=" indicate who calls whom; they are not part
+of the data structure, but are just for the drawing.)
+
+	This way, when INTERN sees the string "RANDOM$NUMBER", it
+will resolve up the string "NUMBER" in NEWRND's name space.
+
+	[This sort of thing can be done in Multics, usually with the
+"initiate" command.  You could manually initiate the "newrnd" segment
+with a reference name of "random", so that linkage faults from the
+string "random$number" will be resolved to the named offset "number"
+within the "newrnd" segment.  Although this is not done too often, it
+is really an important feature.  In the class notes for 6.033
+("Information Systems," by J. Saltzer), this is referred to as
+"user-dependent bindings of names," and is considered an important
+feature of a naming system.  However, Multics does not hve
+multiple instances of programs; you would have to do your manual
+initiate BEFORE "dp" were run and had its links snapped.  On the other
+hand, Multics has the "terminate" command, which I don't think can 
+be done at all in the package system.]
+
+>> Shadowing.
+
+	Suppose the user doesn't like the system NTH function;  he
+might be a former INTERLISP user, and expecting a completely different
+meaning from it.  Were he to say (DEFUN NTH ---) in his program, he would
+clobber the SYSTEM symbol named "NTH", and so affect the "NTH" in
+everyone else's name space.
+
+	In order to allow the (DEFUN NTH ---) to work, the user can
+"shadow" out the system symbol "NTH" by creating his OWN symbol named
+"NTH", and installing it on some obarray which appears in his name
+space before SYSTEM.  For example, if the author of CHAOS were going
+to have his own NTH, he would put a symbol named NTH on the CHAOS
+obarray; since INTERN looks on the CHAOS obarray first (because it
+checks the succesive obarrays of a name space in order), it will
+find the programmer's own NTH, and never the system one.  Since
+the system one is now impossible to see, we say it has been "shadowed."
+
+	Now, there might be some circumstance in which such a user
+would want to have his own NTH, but still be able to refer to the
+version of NTH in the SYSTEM obarray.  Clearly the way for him to do
+this should be to have him type SYSTEM$NTH.
+
+	From our description so far of the maintainance of the
+REFNAME-ALISTs, however, it can be seen that the name "SYSTEM" is
+never actually installed on any REFNAME-ALIST (since SYSTEM has no
+containing package).  So we make the following modification:  every
+obarray FOO shall have an entry in his own REFNAME-ALIST which
+associated the name of FOO's program with the obarray.  This way,
+SYSTEM's REFNAME-ALIST would contain an entry for SYSTEM, and so
+SYSTEM$NTH would work via the usual mechanism.
+
+	Notice that in the previous paragraph we said to associate the
+PROGRAM name, rather than the OBARRAY name.  Why this departure from
+the usual?  Well, consider: where would it make a difference?  A
+circumstance under which it would matter is the following: suppose we
+have the MACSYMA program with all of its sub-obarrays as described
+above. Further assume that the INPUT sub-program's author has his own
+symbol named SIMP, and he calls MACSYMA$SIMP to get the one in the
+MACSYMA package.  Now, say someone wants to load an experimental
+MACSYMA into the machine: he would name the new obarray TEST-MACSYMA
+or something.  In order to assure that the reference to MACSYMA$SIMP is
+properly resolved, the REFNAME-ALIST of MACSYMA must contain the
+TEST-MACSYMA obarray under the name MACSYMA.
+
+>> External Symbols:
+
+	In the current (pre-package) Lisp Machine system, when a user
+wants to invoke EINE, he simply calls the main entrypoint function ("ED").
+Now, if we were to put the editor into its own obarray (presumably named EINE),
+then the user would have to type EINE$ED.  How can we set things up so
+that only ED need be typed?  Clearly the symbol ED must get installed
+on the SYSTEM obarray.  How can we make this happen?
+
+	One possibility would be to place something in the EINE source
+program stating "I want the following syumbols to be installed on
+SYSTEM: ...".  The loading of the EINE program would then cause those
+installations.  We call this "externing" the symbols.
+
+	However, there are problems with the externing scheme.  In a
+Lisp implementation with no package system (say the regular PDP-10
+Maclisp), there is a potential problem whenever the maintainers of
+Lisp install a new function or a new special variable:  some user may
+be using it for a function of his own.  This is the most simple kind of
+naming conflict.  In order to prevent such conflicts, every programmer
+should be aware of ALL of the names of system functions and specials;
+that is one of the things the manual is for.  (Of course, not every
+Maclisp programmer really knows all of Maclisp by heart, but he
+probably knows a lot of it.  It isn't essential for every programmer
+to know every symbol before he writes any program, since there is such
+a thing as debugging, and also because of the FASLOAD warning feature
+(see below).)
+
+	In the package system, a programmer must in the same
+sense be familiar with every symbol in the ancestor obarrays of
+his program.  Most people need be familiar with SYSTEM, and the
+MACSYMA programmers would have to be familiar with the contents
+of the MACSYMA obarray as well.  However, the programmers in all
+cases are only expected to be familiar with their ancestor
+obarrays, NOT their brother obarrays: the writer of EINE need
+know nothing about the contents of CHAOS nor MACSYMA.
+
+	Suppose EINE were to "extern" ED up to the system obarray.
+This violates our principles: the symbol has been placed into the name
+spaces of the MACSYMA and CHAOS programs, and if either of those
+programs use a symbol ED as an internal name, there  would be a
+conflict.  For an even more evil-sounding example, if the writer of A
+externs "FOO", and the authors of B and C each have functions named
+FOO, one of them will get the other's function, even though neither B
+nor C has done anything out of the ordinary (it is A who has caused
+the problem).
+
+	The reason for the disaster is that the authors of B and C had
+never heard of the symbol FOO; it was a creation of the author of A,
+and the authors of B and C should not have to be familiar with A at
+all (according to our principles).  FOO was never mentioned in the
+documentation on SYSTEM (i.e. the Lisp Manual).
+
+	The point here is that a random programmer should not be
+allowed to modify the name spaces of others.  No new symbols should be
+interned on shared obarrays such as SYSTEM and MACSYMA without first
+warning the users.  The contents of those obarrays should be watched
+over and changed by the maintainers of that level, not by the
+maintainers of lower levels.
+
+	Thus, the way to solve the "EINE$ED" problem is to have a
+system symbol named ED in existance at the time the SYSTEM obarray is
+created and filled.  The symbol's presence will be mentioned in the
+manual, so that programmers will know about it and not use it as an
+internal symbol (if someone wants to use it anyway, he can always just
+shadow it (see above)).  When the EINE package is loaded, the symbol
+ED will be found already in the name space (in SYSTEM), and the DEFUN
+will clobber the symbol, thus causing all of the right things to
+happen.
+
+	There is a somewhat subtle interaction between this procedure
+and the multiple-instantiation feature.  Should the maintainer
+of EINE attempt to load a new instance called TEST-EINE, it too will
+try to redefine the SYSTEM symbol ED.  The solution is to have
+a list of symbols which must be shadowed whenever a "for debugging,
+don't install" instance of a program is loaded.  Some argument
+to FASLOAD would specify that this version is "for debugging".
+
+>> The FASLOAD Warning Feature.
+
+	In the current system, if the binding of the symbol FASLOAD
+is T, then FASLOAD checks before storing into a function cell; if
+the symbol was already defined, it tells you "Function so-and-so redefined".
+A specific problem with this is that if you reload a new version
+of a program, you get warning messages for every function, even
+though nothing is wrong.
+
+	In the package system, the FASLOAD warning can be improved
+so that firstly, it is more descriminating about giving you wanrings you want
+and not those which don't, and secondly helps you out with the confusions
+of the package system.
+
+	When using the non-package Lisp system, if a user should read
+in a new version of his program into an environment in which there
+already exists an old version (usually when he is debugging), then the
+FASLOAD warning feature is only an annoyance; it prints out a warning
+for every last function in the program.  Anything in the torrent which
+reflects a real problem, about which the user should be warned, will
+be lost.
+
+	In the package system, however, there could be a form of
+FASLOAD warning which only printed out a message if some symbol whic
+is interned in some OTHER obarray than the program's own were
+modified.  Thus, if youwere to load a program which accidentally
+redefined CONS, the fasload warning feature would point this out
+without also deluging you with the names of all of your functions.
+
+	Secondly, consider the example of loading in EINE, which redefines
+the system symbol "ED".  When the regular version of EINE is loaded in,
+there would be a warning about ED's being redefined; the person supervising
+the loading would simply know that this is alright.  But if a debugging
+version were being loaded and ED were redefined (suppose the programmer
+forgot to mark it as a symbol-name to be shadowed during debugging),
+the person would notice the error, and could take appropriate remdial action.
+
+>> Keywords.
+
+	Several installed functins in the Lisp Machine now use symbols
+as "keywords" in some sense.  A typical case which I shall use is that
+of the functin "TV-DEFINE-PC-PPR", a function which has a wide variety
+of paameers.  The caller usually wishes most of the parameters to
+assume their default values, and so the usual "&OPTIONAL" syntax would
+be very clumsy.  So, after its first two (required) parameters,
+TV-DEFINE-PC-PPR interprets the REST of its arguments as pairs of a
+keyword-symbol representing a parameter, and a value for that
+parameter.  A sample form to call to the function might be:
+
+(TV-DEFINE-PC-PPR 'FOO (LIST TVFONT) 'VSP 6 'SIDEWAYS-P T)
+
+The two options are named "VSP" and "SIDEWAYS-P", and their respective
+values are 6 and T.
+
+	The problem with this convention in the package system is that
+when the above form is read in, symbols named "VSP" and "SIDEWAYS-P"
+will not be found in the name space (since they were created by the TV
+package), and so when TV-DEFINE-PC-PPR checks to see if one of its
+keyword arguments is EQ to its symbol "VSP", it will find it is not.
+
+	The nature of what is going on here is that in using symbols
+as keywords, there is in inherent assumption that there is only one
+obarray; that all mentions of a specific key string refer to the same
+symbol in the Lisp world.  When the package system is not in use, this
+is a very close approximation to reality; but with the package system
+widely in use, the Lisp world abounds with obarrays, and the
+assumption no longer holds.
+
+	How can we solve this?  We are faced with severa issues.  First
+of all, we don't want the package feature to result in a new language;
+the language is Lisp and the addition of the package system should not
+substantially change the way programs are written.  Mostly, it does
+not, but when the "usual" use of the language depends on the
+misconception above, possibly this goal should be compromised on to
+some extent.  Second, the solution should not destroy the benefits of
+the package system.  Finally, of course, it should be as non-kludgey
+as possible.
+
+	Six solutions to the problem have been proposed.  I will list
+all of them here, and perhaps we can decide on one of them.
+
+	I) All keywords shall be installed on the SYSTEM obarray.
+	The advantage to this is that no programs have to be changed
+	at all.  Unfortunately, this results in many more various symbols 
+	on the SYSTEM obarray, which leads to name-conflict problems;
+	that is, the Lisp maintainers would have to install every keyword
+	used by anybody, and they would all have to be mentioned in the Lisp
+	manual to avoid their use by user programs.  This solution is clearly
+	unacceptable.  (I.e. two other people might each name one of his
+	functions VSP.)
+
+	II) A keyword shall be installed on the obarray of the program
+	which defines it.  This also has the advantage that no extra
+	mechanism need be added, and there is no problem of name conflicts.
+	Unfortunately, the form above would have to be rewritten to use
+	"TV$VSP" and "TV$SIDEWAYS-P" explicitly, which is hard to type
+	and possibly somewhat non-conceptual.
+
+	III) All keywords shall be installed on a special obarray devoted
+	to keywords.  The obarray would have a very short name, probably
+	the null string, and the references above would be written as
+	"$VSP" and "$SIDEWAYS-P", which is easier to type.  A new obarray
+	would be added to the system, which would contain keyword symbols only.
+	If two programs each used keywords named "VSP", then the same
+	symbol would be used by each, but this is no problem.  There is no
+	name-conflict problem since nobody would ever define a function
+	whose symbol is on that obarray (i.e. people would not write
+	"(DEFUN $FOO ---)" because they would know better).  However,
+	this scheme still requires the non-conceptual prefix on the symbol,
+	and it requires a little extra mechanism.
+
+	IV) Functions which use keywords should compare their argument
+	to their keywords using SAMEPNAMEP, rather than EQ.  The only
+	code which need be changed is the functions which take keyword
+	arguments; the callers could be left alone.  The problem with
+	this is that it is clumsy; SAMEPNAMEP is a very obscure thing.
+
+	V) Use strings as keywords instead of symbols.  This approaches
+	the single-obarray misconception straightforwardly.  The double
+	quotes are a little harder to type than the single "$" above, but
+	they don't get in the way as much.  One minor deficiency here
+	is that this could not be implemented in Maclisp (it would be nice
+	to be able to have a Maclisp package system).
+
+	VI) Have all keywords installed on the SYSTEM obarray, but
+	give them all names with a short unique prefix such as a "-".
+	Allow programs to "extern" such symbols, for the same reason that
+	III could extern to the keyword obarray.  Of course, this means
+	going back to unique prefixes (which is what we are trying to
+	get away from), but only in a small way.
+
+>> Printing.
+
+	It is important to be able to PRINT list structure in such a
+way that if it is READ in, an piece of list structure will be created
+which is EQUAL to the original list structure.  If an unmodified PRINT
+function were used, which, given a symbol, simply printed out its
+printname, then this property would be lost; any two symbols which had
+the same printname would be read back in as the same symbol.
+
+	Indeed the current non-package-system implementations of Lisp
+do not "work" this way when uninterned symbols (such as are produced
+by GENSYM) are printed.  The reader just sees G0123 and interns such a
+symbol.
+
+	In the package system, PRINT must output characters such that
+if they are read back in, EQUAL stuff is created.  Since READ's actions
+depend on the OBARRAY, so PRINT must depend on it.  Therefore an OBARRAY
+must be specified to PRINT; it would default to the binding of the symbol
+OBARRAY just as READ does.  For examples of what PRINT will print, see
+the examples above of what READ does, and reverse the causality.
+
+	Somehow, PRINT must be able to find the obarray (if any) which
+contains a given symbol, so that it can print it correctly.  The
+problem is how let it find the obarray efficiently and quickly.
+
+--------------------********************--------------------
+        I don't feel like writing this right now.
+--------------------********************--------------------
+
+
+
+********************************
+********** CHAPTER III *********
+********************************
+
+	In this chapter, we explain how the system is used, and
+more of the mechanism behind the features mentioned in Chapter II.
+
+>> Using the Lisp Machine.
+
+	When a user is actually sitting at the console typing, the
+currently selected obarray will be a "working obarray".  It must not
+have any "children", as random stuff is getting interned all over it
+(whenever the user happens to type something); as we pointed out
+above, shared obarrays (non-terminal nodes) must not get dirtied up
+with random symbols.
+
+	Any time he wants, he can call some function which will flush
+his working obarray and make a new, empty one.  This has some of the
+attributes of loading up a new Lisp environment.  Also, if several
+people are playing around on the same Lisp world, they could each have
+their own working obarrays, so that each could have his own symbols
+named "A", "B" and "C" to put temporary thing in (it has happened in
+the past that one person has left A bound to something important, and
+someone else reused A's binding for something else).  These are kind
+of random features, but maybe they will come in useful sometime.
+
+
+>> Introduction to loading.
+
+	All interning and resolution of references happens at the time
+a program is LOADED.  LOADing is what is done by READFILE and FASLOAD;
+both read in bits from an external source, and create certain list
+structure, calling INTERN to get symbols from charactrer strings.
+Thus, the mechanism to support the interesting features mentioned
+above  is mostly implemented at load time. [Note that Multics does
+this stuff at procedure call time, not at load- (or initiation-) time.
+It is different.] (Note that the following does not all apply for
+SYSTEM, which is a very special case; it is never actually loaded,
+since it is created by the cold load.  We will talk more about this later.)
+
+>> The Package Header.
+
+	At the beginning of a file which is a program to be loaded
+into an obarray is the PACKAGE-HEADER, which looks like a printed
+representation of a Lisp form.  It contains some information to be
+given to the package system.
+
+	Several things are given in the package-header.  First, the
+name of the program must be given.  This sometimes determines the name
+of the obarray into which the functions will be read (but not when
+multiple instantiations are being used) and other things (see below).
+Secondly, it may optionally contain an estimate of the size of the
+obarray to create; this will default reasonably.
+
+	Thirdly, it should name all symbols which we expect to find in
+parent obarrays and redefine or rebind (i.e. EINE would specify "ED"
+here); this is so that when a debugging-instance of the program is
+loaded, these symbols can be made to be shadowed.  Fourthly, a list of
+symbols to always "shadow" (actually a list of strings, each of which
+the loader will install on the new obarray).  These both default to
+the empty list.
+
+	Fifthly, the package header should contain a list of the names
+of the obarrays of any "child" obarrays of this one; the reason will
+be explained below.  This defaults to the empty list.
+
+	In many (perhaps most) programs, only the program name will
+actually be specified in the header, and everything else can default.
+
+>> Arguments to Loading Functions.
+
+	Some of the features above also require changes to READFILE
+and FASLOAD.  The following options must be availible, as &OPTIONAL
+or keyword arguments to READFILE and FASLOAD, so that the user can
+control the loading process when he wants to.
+
+  First of all, the name of the obarray should be specifiable (usually
+for multiple instantiations of a program); if it is omitted, the
+program name in the package header is used instead.  There should be
+some way of specifying whether this loading is for debugging or to be
+installed;  perhaps the presence of the obarray-name argument should
+determine this.  Secondly, any translations which the caller wants set
+up for the new obarray can be given.
+
+>> When do you load?
+
+	So far, when discussing the loading of program, we have
+assumed that all other programs which it refers to in any way were
+already loaded before we began.  This, in general, is not the case.
+Sometimes we will load a program FOO which refers to a program BAR
+which has not yet been loaded into the machine.  What would happen
+given the INTERN algorithm already presented is that the "ASSOC"
+would fail to find any obarray; this case must not neccesarily cause
+an error.
+
+	Just what should it do?  The most obvious thing would be
+for it to create an obarray by that name (BAR) and load in a program,
+and then continue loading FOO from where it left off.
+
+	Several issues present themselves.  The first is, where does
+it find the program?  For this problem, we borrow the concept of
+"search rules" from the Multics dynamic linker.  The user would have
+some sort of list of file-system directories, and something derived
+from the obarray name would be searched for in the directory (you
+might search for "LM <name>" in the ITS file system just as the DDT ^K
+command searched for "TS <name>";  the exact way this would work
+depends on the file system).
+
+	The most important problem is the cost entailed in loading
+other programs.  Suppose someone were to write a small, interactive
+system which just happened to have a rarely-used "escape to MACSYMA"
+sommand in it.  The code to implement the command would presumably
+have a call to MACSYMA$TOP-LEVEL or something, and with our simple
+scheme, all of MACSYMA and every program IT called would have to be
+read in, just to read in the small interactive system.
+
+	We would like some scheme whereby the reading in of the called
+program (i.e. BAR) could be delayed until necessary (or convenient),
+and let FOO finish loading in a reasonable amount of time.  The thing
+to notice is that to load FOO does require the existence of the BAR
+obarray, but not all of BAR's symbols and functions.  All we need do
+is to create the BAR obarray without populating it, and then let FOO
+continue loading.
+
+	It is important, however, that any shadowed symbols on the BAR
+obarray get installed before FOO continues loading: if FOO refers to 
+BAR$APPEND, and BAR happens to shadow APPEND, FOO's reference must
+resolve to the APPEND on the BAR obarray, not the SYSTEM obarray.
+Also, we do not want to lose the guess made by the author of BAR
+regarding the approximate size of BAR's obarray.  So we should not just
+make a random new obarray; we need some information from the program.
+
+	Fortunately, all of this information appears in the package
+header.  When we are loading FOO and see "BAR$BLETCH" and there is no
+"BAR" obarray to be found, we INITIALIZE the BAR program.
+Initialization entails finding the program in the file system (via
+the search rules), and reading in the package header and creating the
+obarray with all shadowed symbols.  It also saves the pathname of
+the file, so that when we later FULLY-LOAD the program, we need not
+repeat the search (and possbily get something different, due
+to changes in the contents of directories!).
+
+	Another question is, when then does the package finally
+get fully-loaded?  Well, it must really be loaded when it starts
+getting used.  At the risk of sounding like InterLisp, we humbly
+suggest that perhaps this should be consigned to the error handler.
+When an "undefined symbol" or "unbound symbol" error occurs on a symbol
+whose obarray is partially-loaded, an attempt should be made
+to fully-load it, and then the reference should be retried.  This
+is not too different from the way "AUTOLOAD" works in present
+MACLISP.
+
+	This business could be kept out of the error handler by
+putting a special "loading" function into the function cell of all
+newly created symbols for partially-loaded obarrays, but this does not
+work in the case of use of value cells of externally referenced
+symbols.  Also it seems to me (DLW) that it would be a crock.
+
+	If anyone thinks that the error handler should have more
+solid evidence before doing the full-load, we might have the
+reference to BAR$APPEND put a property list entry on the created
+APPEND; I don't think this is necessary, but we were discussing it
+at one point.
+
+>> Loading Programs Which Have Sub-programs.
+
+	This is somewhat tricky.  Suppose we are loading program A,
+and come across an attempt to intern "B$C$D", and we cannot find "B"
+on any refname-alists of obarray's in A's name-space.  Apparently we
+must create and initialize an obarray "B" under "SYSTEM", then create
+and initialize an obarray "C" under "B", and then create a symbol
+named "D" and install it on the newly-created "C".
+
+	There is a problem.  Suppose that, for some reason, there is a
+symbol named "D" in the main part of the "B" program.  Had we loaded "B"
+and its subprograms, the right thing would be for a symbol "D" to be
+installed on the "B" obarray, and so for the name "D" in "C"'s context to
+refer to the symbol "D" on the "B" obarray.  (Recall that "C"'s name
+space would be (C B SYSTEM) ).  But in our example, we have installed a "D"
+on "C", when in fact there never should have been one there.  The string
+"B$C$D" refers to whatever the symbol "D" means in the "B$C" context,
+and the symbol "D" in that context meant a symbol "D" on "B"; there should
+be no "D" on "C".  (This might be a little opaque, and possible should be
+read twice.)
+
+	To avoid this problem, we establish the following rule:  Before
+any interning is done on an obarray, all of the "ancestor" obarrays in
+its name space must be fully loaded.  If this rule is followed,
+the above error cannot occur.
+
+	Note that this even works for the SYSTEM obarray; it is considered
+to be fully-loaded at the time Lisp starts up, and nothing new is ever interned
+on it.
+
+	So, the interning of "B$C$D" must actually fully-load "B".  This may
+be somewhat time-consuming, but we should stress that it will happen rarely.
+First of all, there are not too many programs so big as to have subprograms.
+Secondly, the "shared" obarrays (such as "B") will probably be fairly small.
+Thirdly, a reference with "two $'s in it" (such as B$C$D) is not common;
+as (I think?) we pointed out above, if "D" is so useful that programs
+outside of "B" want to use it, shouldn't it be in the "B" obarray itself?
+So we doubt that this will lose too much speed.
+
+	A worse problem is the following.  Suppose we are loading "B",
+which lives directly under SYSTEM in the hierarchy.  All of its
+ancestors are loaded, so it is all right to load it.  It has a son
+named C, which (of course) has not been interned on yet.
+
+Now suppose we come across the string "C$FOO" to be interned.  This
+clearly refers to a symbol in the name-space of the sub-program of B's
+named C. If there is already a "FOO" on B (assume there is not one on
+SYSTEM!), then clearly that is the one being referred to.  But if
+there is not, we are in trouble.  We cannot just create it and install
+it on C, because C has an ancestor, viz. B, which is not yet fully
+loaded.  That is, for all we know, there will be a symbol FOO later on
+in B, which we have not yet discovered.  We cannot continue loading B
+to find out, because we must finish up with the "C$FOO" before
+proceeding with the loading of B.
+
+	One solution to this problem is to have a two-pass loader, which would
+first scan the file and intern all symbols which are referred to without "$"'s,
+and then perform the loading process without worry.  However, this is kind
+of slow and a large change to the was things work.  It should be given some
+consideration.
+
+	But the other solution we have thought of is, essentially, to punt.
+In order for this problem to come up, we must presume that the author of
+B wanted to get at his own symbol FOO, but referred to it by means of the
+roundabout method of typing "C$FOO".  This is a fairly silly thing to do;
+there could never be any purpose in it.  (Can anyone think of one?)
+So, we propose to simply break the rule and install FOO if it is not found.
+
+	So, here is how things work.  When there is an attempt to intern
+a symbol in the B program or any of its subprograms, we first initialize
+ALL of the obarrays of the B hierarchy.  Initializing is not very slow,
+since only the header of the file must be read in.  Then, we read in
+the B program.  If there is a reference to "C$FOO" and C is a sub-program
+of B, we simply use the normal interning procedure to intern FOO on C,
+even though C has a not-fully-loaded ancestor.  If FOO was shadowed
+by C, then the symbol FOO will already exist on C (from the initialization),
+and so things will work.  If there is already a FOO on B, that FOO will
+be returned, also correctly.  Otherwise a FOO will be installed on C, and
+this is only incorrect if the writer of B intended for this to refer to his
+own FOO and he has not yet mentioned his own FOO directly (this is what
+we referred to earlier as silliness on the part of the author of B).
+Otherwise there is no problem.  If the original attempt which started
+this loadage was to a sub-program of B (say to B$D$BAR), we continue after
+loading B by interning BAR on D's name-space, and returning the result.
+
+;**********************************************************************
+;********** notes on stuff to be discussed. ***************************
+;**********************************************************************
+
+Making your own working obarray inferior to SUPDUP for debugging stuff?
+Is it worth it?  Do you lose all the stuff of your regular obarray?
+Alan, what did we decide about this?
+
+I forget, just what is the conclusion about interdependent packages?
+
+Mention the business about the extra arg to INTERN.
+
+>> LOADING LAWS (applicable in a Loading Zone)
+FIGURE THIS OUT!!!!
+You may not be fully loaded until all of your
+ancestors are fully loaded.  Also until all of your
+inferiors are partially laoded.
+
+	Problem with the "%" obarray.  Best thing we can think of
+is to make it an obarray under SYSTEM and have everyone use "$'s.
+You may not say (INTERN '%$%q-POINTER) because that would get the
+symbol on two obarrays which screws PRINT.
+Put this in section on PRINT and PRINT SCREWS.
+
+	Formast of the package header: (PACKAGE "DP" ---).
+Rigging PACKAGE to be an error function to let r-e-p loops win.
+
+
+;**********************************************************************
+;********** stuff below here is obsolete. *****************************
+;**********************************************************************
+
+	The next step depends on the state of the refname.
+
+	If it is unloaded, then it should get partially loaded
+(see below) and we continue with the partially loaded case.
+
+	If it is partially loaded, we give the string to BASIC INTERN
+with second arg being CREATE.  {We may want to consider fully loading it;
+the problem is that if two packages refer to each other, this would not
+work.}
+
+	If it is fully loaded, we give the string to BASIC INTERN
+with second arg being ERROR.  (The intent is to detect spelling errors,
+and also that a symbol has been removed from the called package since the
+time the program being loaded was written.  If it were a function you
+would have gotten an UNDEFINED FUNCTION error when you ran it, but it seems
+worthwhile to try to detect that at this point. {Maybe not?})
+
+-------------
+
+	The exact format is not decided yet, but will be a usual
+Lisp-machine style keyword argument list (because most things will
+just default).  One required argument is a string called the DEFAULT REFNAME.
+
+NOTE: The vanilla package will let all of the options default.
+
+	Options include:
+o The abbreviation alist, in some form {probably as an alist!}.  
+   (Defaults to no abbreviations at all.)
+o An estimate of the size of the obarray (this will default to some
+   reasonable number.  {The obarray can always be grown, though that takes
+   some time})
+o The refname of the DADDY-OBARRAY.  (This defaults to "SYSTEM".)
+o The names (i.e. strings) of any external symbols,  and the obarray
+   to which they are externalized (defaults to the DADDY-OBARRAY which is
+   actually used.)  (The whole thing defaults to no externalized symbols.)
+
+	The externalized symbol gets BASIC INTERNed (with second arg
+CREATE) on the given obarray (which ought to be an ancestor of the
+package whose header this is).  The editor, for example, would do this
+to the symbols "ED", "EDPROP", and "EDVAL" (as things stand now, those
+are {I think} the names of the user called entrypoints.)  This will
+also be used by sub-packages (see below).  Also see the section on
+READ SCREWS below.
+
+>> HOW TO LOAD A PACKAGE.
+
+	A package can be loaded either by READFILE (for an interpreted one)
+or by FASLOAD (for a compiled one).  There are several options to these
+two LOAD functions, which, in the vanilla case, all default.  They are:
+
+o Refname. (Defaults to the "default refname" in the header.)o 
+o Size of obarray. (Defaults to the one in the header.)
+o Daddy Package. (Defaults to the one in the header.)
+o Translations. (Defaults to no translations at all.)
+
+	The first part of loading is to read in the header, and
+compare with the arguments and do all the defaulting.  Then the
+obarray of the computed size is created, the abbreviation and
+translation alists, the DADDY-OBARRAY, the absolute pathname, and the
+refname {maybe also the default refname from the header, for
+debugging} are stored in the package somewhere.  An entry is added to
+the REFNAME-ALIST associating the computed refname with the package. 
+
+	The package is now said to be PARTIALLY loaded.  It is possible
+to stop here, close the file, and leave the package partially loaded.
+(See WHEN TO LOAD A PACKAGE below).
+
+	To continue loading it: if you have closed it, reopen it
+(from the saved absolue pathname), and skip the header (by doing a READ)
+

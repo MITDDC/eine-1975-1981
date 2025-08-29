@@ -1,0 +1,37 @@
+
+GLS@MIT-AI 05/05/77 06:17:06 Re: ` (alias ") feature
+To: (BUG LISPM) at MIT-AI
+CC: (BUG SCHEME) at MIT-AI, (BUG LISP) at MIT-AI
+I have already remarked on the fact that within the
+`(LISPM)/"(SCHEME) construction it is often necessary
+to write two commas in a row if one has nested the
+construction, which is common in macro definitions.
+Therefore the use of ,, for @ is not acceptable.
+I would add now that one would like to have some control
+over the amount of consing that happens.  I propose
+the following set of conventions, eventually to be
+adopted universally by LISPM, SCHEME, and MacLISP:
+
+` is the signal for the construction (by the way, the fonts
+	for the TV's should be fixed up to emphasize even more
+	the difference between ' and `).  It is permissible
+	to share constant structure.
+`? is the signal for the construction, with no sharing
+	of constant structure allowed.
+, denotes simple substitution
+,? denotes copying substitution (i.e. ,?x => (SUBST NIL NIL x)).
+,@ denotes segment substitution.  It is permissible to share
+	structure with the segment as long as it is non-destructive.
+,@? denotes segment substitution, but the whole structure must
+	be copied
+,@@ denotes segment substitution, but the top level of the list
+	must be copied
+,@! denotes segment substitution, and one may use NCONC to splice
+	it in.
+
+This is a decidedly non-optimal syntax, but I wanted to point out
+the variety of desirable options, and to solicit comments
+or improvements.
+I might suggest in passing the use of ~ (tilde) instead of `,
+since ~ is less confusable with '.
+

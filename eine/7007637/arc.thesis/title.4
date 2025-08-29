@@ -1,0 +1,143 @@
+ -*-text-*- DLW's DCH's thesis!
+.dv xgp
+.fo 0 30vr
+.fo 1 30vrb
+.fo 2 30vri
+.fo 3 30vrb
+.fo 4 22fg
+.fo 5 xfont;14baxb
+.fo 6 25fr1
+.fo 9 fonts;plunk
+----------------Make spacing_choice 1 for single-spaced report, 2 for thesis
+.nr spacing_choice 1
+.nr chapter_font 1
+.nr section_font 1
+.nr chapter_toc_font 0
+.nr section_toc_font 0
+.nr table_of_figures 1
+.nr print_headings 0
+.nr heading_pos 1200
+.nr heading_font 1
+.sr left_heading
+.sr center_heading
+.sr right_heading \page
+.nr print_footings 0
+.nr footing_pos 400
+.nr footing_font 2
+.sr left_footing
+.sr center_footing ERROR
+.sr right_footing
+.sr footnote_starter    
+.so r;r macros
+.margin 1.5i 1.6i 1.5i 1.4i
+.ls 1
+.rs
+.fi c
+'fs 5
+A REAL-TIME DISPLAY-ORIENTED EDITOR FOR THE LISP MACHINE
+'fs
+
+by
+
+Daniel Louis Weinreb
+
+
+Submitted in Partial Fulfillment
+
+of the Requirements for the
+
+Degree of Bachelor of Science
+
+at the
+
+Massachusetts Institute of Technology
+
+January, 1979
+
+
+
+
+
+.nf
+Signature of Author_
+Department of Electrical Engineering and Computer Science, January 19, 1979
+
+
+Certified by_
+Thesis Supervisor
+
+
+Accepted by_
+Chairman, Departmental Committee on Theses
+
+
+
+.fi b
+     This research was supported in part by the Advanced Research Projects
+Agency of the Department of Defense and was monitored by the Office of Naval
+Research under contract no. N00014-75-C-0661.
+
+
+.bp
+.fi c
+'fs 5
+A REAL-TIME DISPLAY-ORIENTED EDITOR FOR THE LISP MACHINE
+'fs
+
+by
+
+Daniel Louis Weinreb
+
+
+'fi b
+Submitted to the Department of Electrical Engineering and Computer Science
+on January 19, 1979 in partial fulfillment of the requirements for the
+Degree of Bachelor of Science
+
+Abstract
+.fi b
+
+     ZWEI is a real-time display-oriented editor, written for the Lisp Machine.
+It is display-oriented in that the text being edited is displayed on the screen
+at all times; it is real-time in that commands are executed as soon as they are
+given.  The result is an extremely interactive and efficient kind of editing.
+This kind of editor has become very popular in widespread parts of the MIT
+computer community, and has been found to be easy to use yet extremely powerful.
+This thesis describes the user interface presented by ZWEI, and explains
+how ZWEI was implemented.  An emphasis is placed on the way the nature of the
+Lisp Machine system affected ZWEI's design.
+
+.fi l
+Thesis supervisor:  Marvin Minsky, Professor of Electrical
+Engineering and Computer Science
+
+.fi b
+     This research was supported in part by the Advanced Research Projects
+Agency of the Department of Defense and was monitored by the Office of Naval
+Research under contract no. N00014-75-C-0661.
+.bp 
+.sp 15
+1Acknowledgements*
+
+     I would like to express my appreciation and thanks to:
+
+The rest of the "Emacs-Like Editor Writers of America": Ted Anderson (SINE),
+Bernie Greenberg (Multics EMACS), and Richard Stallman (ITS EMACS);
+
+Richard Greenblatt, for starting me off on the A.I. Lab, the Lisp Machine
+project, and this editor;
+
+Dave Moon, who taught me a great deal of what I know about programming
+and with whom I spent countless hours working on Lisp Machine software
+and documentation;
+
+Mike McMahon, Richard Stallman, and the rest of the Lisp Machine group
+for writing parts of EINE and ZWEI and for their suggestions, discussions,
+and good ideas;
+
+Ted Anderson, for TINT's not being TECO and SINE's not being EINE;
+
+and finally to all the members of the Student Information Processing
+Board, for the endless friendship and moral support that made my
+stay at MIT so pleasant and rewarding.
+

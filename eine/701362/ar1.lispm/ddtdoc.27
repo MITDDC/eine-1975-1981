@@ -1,0 +1,306 @@
+	Some specifications for the Lisp Machine DDT.
+
+>> General description, pointers and offsets.
+
+> Why it should work that way: internally and externally.
+
+	The nature of the address space of an ITS job is very different 
+from the address space of a LISP Machine.  This will result in a major 
+difference between LISP Machine DDT and ITS DDT.  In ITS DDT, al quantities
+are simply numbers.  An address is just a number, which may have a symbolic
+representation.  But in the LISP Machine, addresses as numbers are neither
+meaningful nor useful to a person debugging.  Since storage allocation
+and return is automatic and strictly formatted, it seems clear that the
+debugger should know all about the natures of these formats in order
+to make the debugging procedure clearer and more convenient.
+	The meaningful way to express an address in the LISP Machine is as
+a LISP pointer, together with an offset.  The reason why this is also
+the most useful for a user interface can be explained in an example:
+in ITS, when debugging a program, let's say you have a buffer which you want
+to inspect.  Well, you know the buffer is 2000 long and starts at address
+BUF0 in the job.  You type BUF0 <slash> followed by linefeeds, and you get to 
+see it.  But in the LISP Machine, you have no idea where NUMERICALLY that 
+buffer lives in memory; it was automatically allocated by MAKE-ARRAY-BLOCK
+wherever there happened to be room at the time.  What you DO know is how to
+get to it from known places, such as arguments and/r locals on the stack,
+the constants area of a FEF, or the value cell of a symbol.  THAT is how
+you will want to get to it in the debugger also.
+
+> What can quantities be?
+
+	Any LISP object should be representible as a quantity in DDT.
+A "quantity" is, for example, what the values of "alt-q" and "point" are.
+As was pointed out above, with each should be an offset.  However, not
+all LISP objects can be stored in DDT's storage: specifically,
+header words may not be retreived from memory into the machine.
+[But headers are not pointers anyway...].
+
+	However, other things must also be allowed as quantities, so that
+"point" can be set to them and they can be opened.  For example, arguments
+to functions and local variables should be addressable in a reasonable 
+way.
+
+	Here are some diversified examples of several kinds of things which
+ must be allowed as quantities.  After looking over this list of examples,
+it should be more clear how a quantity should be represented inside DDT.
+
+	ARG 2	--	The third argument to the current function (see
+			below the discussion of the "current stack frame")
+	LOCAL 5	--	Similarly.
+	INSN 65	--	The instruction in halfword 65 of the "current FEF"
+			(see discussion below).  This would print out in
+			a very readable format, like the DISASSEMBLE program.
+	#<DTP-ARRAY-POINTER 343656> | 33
+		--	The 33rd element of some array.  (Note that I am
+			not implying that the user actually typed this,
+			he just managed to get it into the value of alt-q).
+	#<DTP-ARRAY-HEADER 212454>
+		--	This array header, which cannot be stored as such.
+			It cannot have an offset since it is not really a pointer.
+			There will also be a way to have it print out that magic
+			number in a readable format, but note that the header without
+			the pointer is not too useful since it will not tell you
+			the dimensions of the array (unless it is a small 1d array)
+			nor the size of the leader, etc.
+
+
+	As can be seen, there are three types of quantities:  
+A LISP pointer with an offset.
+An "artificial pointer" (like ARG) with an offset.
+A LISP non-pointer object.
+
+> Data type classification:
+
+So the LISP pointers are:
+DTP-NULL and DTP-SYMBOL, with meaningful offsets between 0 and 3 inclusive.
+DTP-LOCATIVE and DTP-LIST.
+DTP-FEF-POINTER, in which the offset is in words and is meaningful up to the
+			length of the FEF.
+DTP-ARRAY-POINTER, in which the offset is in elements for the time being
+			(but do we want three offsets for a 3D array?)
+DTP-SYMBOL-HEADER, likewise.
+DTP-STACK-GROUP	(should this be ike ARRAY, or kludged up to be simple offsets
+		which type out as the names of the registers being saved in the
+		stack group head?)
+DTP-CLOSURE hmm....
+
+Then there are pointerless LISP objects:
+
+DTP-FIX, DTP-HEADER, DTP-U-ENTRY, DTP-ARRAY-HEADER.
+
+Also there are artificial pointers like ARG, LOCAL, INST, and others.
+
+
+
+
+
+
+>> Stack groups.
+
+> Entering DDT.
+
+	The usual way that the user will enter DDT will be involuntarily,
+by an error happening.  When an error occurs, the current stack group will
+be swapped out [note that there is probably no good STATE for it to be in
+inder current schemes] and a stack group with DDT in it will be swapped in.
+It will somehow [currently through A memory] get a pointer to the errored
+stack group, and get some information about the nature of the error.
+	[Perhaps the function on top of the error stack group will
+not be DDT itself, but some kind of breakpoint loop from which DDT can
+easily be called as explained below.]
+
+> Exiting DDT.
+
+	For such errors as "car of a number" there are several things which
+the user might want to do (after poking around to determine the cause of the bug).
+He might want to substitute a valid thing for the call to CAR to return.
+Or, he might want to reenter the stack frame after a throw to top level has
+happened.  The exact mechanism is unclear.
+
+> The current stack group, stack frame, and function.
+
+	So sometimes there is a "current stack group" (usually there is).
+The user may select any stack group to hack (except the running one),
+and when he automatically enters DDT the erroring stack group is
+automatically selected.
+If there is a "current stack group," then there may be a "current stack
+frame."  When you select a stack group, the top stack frame is automatically
+selected.  (If all of this automagic turns out to be a pain, it can be
+flushed.)
+	There can also be a "current function" which can be anything
+liked by D-QMRCL etc.  If there is a current stack frame, then the current 
+function is the function of the frame.  However, if you want to go
+examine some random FEF, you can set the current function to that FEF, and
+have no current stack frame at the moment.  The artificial pointers
+ARG and LOCAL will only work if there is a current stack frame.
+
+> Digression about stack group states.
+
+	When a running stack group gets an error, in what state is it left?
+More hair is needed in the stack group handling in the machine in general to
+allow clock-level scheduling, etc.  (We at least need this for a network "who"
+server, and it is a nice thing in general (as we know from ITS)).
+	DDT will have to know about these, and probably will not be able
+to hack a runnable stack group in usual fashion.  Since the current machine
+has no interrupt capibility, this will probably wait for the next machine,
+and DDT will be hacked appropriately then.
+
+> Error protocol.
+	There has to be some way to tell DDT what error it was that caused
+DDT to be invoked.  This is especially a problem for micro-code level errors.
+Some micro-code errors may actually be irrecoverable; if the stack group
+is in an inconsistent state and cannot be swapped out, for example.
+But most errors are not like this.  The ILLOP subroutine will have to be haired
+up to catch the OPCs off the unibus (like the transporter) so that the calling
+routine can be identified.  We will probably have to go through the microcode
+listing, and identify irrecoverable errors.  Next to each recoverable one
+we should put some CONSLP pseudo-op which contains some sort of indication about
+the error.
+	What should it have?  Will the cold load generate an ERROR-TABLE
+with messages?  Does DDT know specifically about each error?  
+Maybe each error should have a number, and there will be a table of english
+error meassages, and DDT will have a dispatch table of some sort indexed by
+these numbers.  Suggestions?
+
+>> User interface.
+
+> Commands
+
+The top level will look something like ITS DDT.  I maintain the same position
+on this as I do with the editor, namely that the little simple commands
+that you type a lot with minimal effort must be compatible with ITS,
+since otherwise you need two sets of habits, which is out of the question
+(think of how hard it is if you are an incremental search type using an
+EMACS with character search, or vice wersa).  But for the harder-to-type,
+rarer commands, there is much less need for ITS compatibility.
+
+[consider the following: the = command, ], [, _ (i.e. underscore
+meaning "type out as symbolic"]
+
+
+	So, the idea is that the basic commands such as slash, cr, lf, 
+tab, backslash, alt lf, alt cr, and so on will do the same thing.
+Also, the usual aritmetic functions will be availible, at least plus,
+minus, and underscore.  Also point, alt point, alt q, alt <n> q, etc
+should work.
+	However, there will be many commands whose names are long
+(they are typed less often) and are quite specific to the LISP Machine.
+Some suggested ones are listed below.
+
+	The arithmetic commands will also exist, but work differently due
+to pointers.  A quantity will either have a pointer or not.
+It is not meaningful to do arithmetic on pointers, so adding two pointered
+quantities is an error.  If you add a pointered to a pointerless quantity
+then the result has that pointer, and its offset is the sum of the two offsets.
+Also, if you subtract a pointered from a nonpointered, the result has the pointer
+ans the difference of the offsets, that is, the pointer does not get "negated."
+
+> Typein.
+
+	How about typein?  Well, for pointerless quantities, or those with
+artificial pointers, there is no problem.  But how do you type in quantities
+with pointers?  Upon consideration, it is clear that this is not too meaningful either.
+There will be a mode in which you actually type in the datatype and the numeric
+parts of a LISP object, but you hardly ever want to do this.  In general,
+you cannot type them in.  However, you can type the name of a symbol, and
+this will be equivalent to "typing in a DTP-SYMBOL object."  (Which obarray
+do we look up the string on?) This is how you get at values which you know can
+be found from the value and function and property cells of symbols.
+
+> "Local symbol" feature.
+
+I propose that there be a list (hash-table?) of "local symbols", none of
+which are predefined. They are set by the user to avoid typing.  For example,
+say the user isinterested in a certain array, which he knows he can reach by
+looking at ARG 5 and then typing a sequence of slashes, linefeeds, etc.
+He now wants to keep this array availible without having to go through
+the long typing sequence.  So he defines a "local symbol" which 
+DDT will associate with that quantity.  The command for defining
+"local symbols" would probably be a colon, for compatibility.
+Note that these are just temporaries for the debugging session.
+There should also be facility to recover the last <n> things typed out,
+which I think is already availible as <alt>nQ.
+
+>Escape to LISP.
+
+	There should also be some way to "escape" to lisp, to get
+some expression EVALed to produce a quantity.  (Maybe use comma,
+since the ITS function is meaningless on the lisp machine, and for
+similarity to the backquote macro).
+
+> The screen.
+
+There should be a provision for raid registers.  I don't know exactly what yet.
+In any case, the current stack frame (if any) and function (if any) will
+somehow be indicated at the bottom of the screen, and updated like raid registers.
+
+> Single stepping.
+
+	At the moment there is no way to set breakpoints or to single step.
+For single stepping there should be a mode which steps through all
+function calls, and one which treats a function call as just one
+instruction and zips through the call (this is like what ITS DDT
+already has for <alt>^N and ^N.).
+
+
+>> Some useful commands.
+	Specific commands will be provided to simulate DESCRIBE-FEF and
+DESCRIBE-ARRAY and DESCRIBE-THE-CURRENT-STACK-FRAME and so on.  Other specific
+commands needed are BAKTRACE, in various flavors (function names only, arguments
+too, locals too, hairy ADI etc. too.)
+
+Don't worry about the length of the names, the TOPS20 reader will be used.
+
+:DESCRIBE-FEF	Tells a lot about the current FEF.  For now it will do what the
+		lisp function of the same name does, but there will also exist
+:DESCRIBE-ADL	which tells in excrutiating detail what is in the adl.
+
+:FEF <quantity>	Will make <quanitity> the current fef.  The arg must be a fef pointer.
+
+:DOWNSTACK <arg> Also :BS, :DS. <arg> defaults to 1.
+		If <arg> is a number, then there had better be a current stack frame.
+		It moves down the stack by <arg> active blocks and makes that
+		the current frame.  If <arg> is a function name, it moves down
+		until it finds a frame with that function (make a first pass search
+		so that nothing will happen if not found.)
+
+:UPSTACK <arg>	Also :US.  Like DOWNSTACK, but up!
+
+:STACK <arg>	If arg is a number, move to <arg>th frame, where 0 is the
+		top of the stack.  If <arg> is a function, start at the top
+		and search backwards.
+		[How do you look at opened but inactive frames?]
+
+:ATOM <atom>	Much like what CC does.  Maybe it should push all four values on
+		the ring buffer of alt-Q.
+(Maybe :ATOM FOO is a command to make point the appropriate DTP-SYMBOL
+and open it, letting alt-Q be the DTP-SYMBOL-HEADER word.  Or maybe
+FOO/ should do that.)
+
+:BAKTRACE	This takes lots of arguments, probably by keyword.
+		You may want to see arguments, locals, ADI, open call blocks,
+		the SPECPDL, etc, etc.
+
+
+>> What if you aren't a system hacker???
+>> Problems, issues, other questions, etc.
+	Should there be hairy typein and edit mode like CC?  This
+is mostly useful in CC for the microcode and not as much for other things,
+and it is pretty hairy to have totally winning output modes which
+are described in a "language" like CC uses (e.g., think of how hairy
+out macrocode is and how badly CC loses...)
+
+ 
+
+	Problems include:  for an array pointer, is the offset in q's
+or in elements?  For now it will always be in elements, but that may change.
+Another problem is how to treat invisible pointers.
+	Another question is how users look at list structure.  The usual
+slash can mean "look at the CAR" when point is DTP-LIST, but how do
+you look at the CDR?
+If point is an array pointer and alt-q an arra
+y header, you
+type "point ?".  If alt-q is an array pointer you just type "?".
+This tells you all about the array.
+
+How do you look at leaders?  Negative offsets?

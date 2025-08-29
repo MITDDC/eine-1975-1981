@@ -1,0 +1,338 @@
+
+; The DDT command dispatch table, initial setup.                  -*-LISP-*-
+
+; Entries in the table may be:
+; A positive number, which means this is an indirection through some other entry
+;   in the table; the number is the new row number, the same column number is used.
+; A negative number, which is a DDT-SYNATX- thing, known about by the "tty prescan"
+;   in DDT-TOP-LEVEL. 
+; A function object, which is a function to call when the key is typed.
+
+; The first index into the array (the "column") can be from 0 to 5:
+; 0 - Plain character.
+; 1 - Control character.
+; 2 - <Altmode> character.
+; 3 - <Altmode> control character.
+; 4 - <Altmode> <Altmode> character.
+; 5 - <Altmode> <Altmode> control character.
+
+; The second index is the character typed, minus 40. (No SAIL characters are commands.)
+
+; The function is passed the following args:
+; (none yet)
+; ^^ add more here.
+
+; It returns the following:
+; 1 - T if it wants more to be read in by TOP-LEVEL,
+;     NIL if it is done.
+; ^^ add more here.
+
+(DEFUN DDT-INIT-TABLES ()
+    (SETQ DDT-INITIAL-COMMAND-DISPATCH-TABLE
+      '(
+
+(			     ;UNSHIFTED CHARACTERS
+      (*REPEAT 10 DDT-SYNTAX-BREAK)
+      DDT-SYNTAX-BREAK		      ;(
+      DDT-SYNTAX-BREAK		      ;)
+      (*REPEAT 5 DDT-SYNTAX-ALPHANUMERIC)
+      'DDT-CMD-SLASH
+      (*REPEAT 12 DDT-SYNTAX-ALPHANUMERIC)	      ;digits
+      (*REPEAT 2 DDT-SYNTAX-BREAK)
+
+      DDT-SYNTAX-BREAK		      ;<
+      DDT-SYNTAX-BREAK		      ;=
+      DDT-SYNTAX-BREAK		      ;>
+      DDT-SYNTAX-BREAK		      ;?
+      DDT-SYNTAX-BREAK		      ;@
+      (*REPEAT 32 DDT-SYNTAX-ALPHANUMERIC)
+      DDT-SYNTAX-BREAK		      ;[
+      'DDT-CMD-BACKSLASH	      ;\
+      DDT-SYNTAX-BREAK		      ;]
+      'DDT-CMD-UPARROW  	      ;^
+      'DDT-CMD-UNDERSCORE             ;_
+      DDT-SYNTAX-BREAK		      ;`
+
+      (*REPEAT-EVAL 32 (+ 101 DDT-RPCNT))      ;MAP LOWER CASE INTO UPPER CASE
+      (*REPEAT 5 DDT-SYNTAX-BREAK)
+      DDT-SYNTAX-BREAK		      ;NULL
+      DDT-SYNTAX-BREAK		      ;BREAK
+      DDT-SYNTAX-FLUSH-TYPEIN	      ;CLEAR
+      DDT-SYNTAX-BREAK		      ;CALL
+      DDT-SYNTAX-BREAK		      ;ESCAPE
+      DDT-SYNTAX-BREAK		      ;BACKNEXT
+      DDT-SYNTAX-BREAK		      ;HELP
+      DDT-SYNTAX-RUBOUT		      ;RUBOUT
+      DDT-SYNTAX-BREAK		      ;BS
+      DDT-SYNTAX-BREAK		      ;TAB
+      'DDT-CMD-LINE		      ;LINE
+      DDT-SYNTAX-BREAK		      ;VT
+      DDT-SYNTAX-CLEAR-SCREEN	      ;FORM
+      'DDT-CMD-RETURN		      ;RETURN
+      (*REPEAT 2 DDT-SYNTAX-BREAK))
+(							;CONTROL CHARACTERS
+      (*REPEAT 10 DDT-SYNTAX-BREAK)
+      DDT-SYNTAX-BREAK		      ;(
+      DDT-SYNTAX-BREAK		      ;)
+      (*REPEAT 6 DDT-SYNTAX-BREAK)
+      (*REPEAT 12 DDT-SYNTAX-ALPHANUMERIC)	      ;digits
+      (*REPEAT 2 DDT-SYNTAX-BREAK)
+
+      DDT-SYNTAX-BREAK		      ;<
+      DDT-SYNTAX-BREAK		      ;=
+      DDT-SYNTAX-BREAK		      ;>
+      DDT-SYNTAX-BREAK		      ;?
+      DDT-SYNTAX-BREAK		      ;@
+      DDT-SYNTAX-BREAK		      ;A
+      DDT-SYNTAX-BREAK		      ;B
+      DDT-SYNTAX-BREAK		      ;C
+      DDT-SYNTAX-FLUSH-TYPEIN ;D
+      DDT-SYNTAX-BREAK		      ;E
+      DDT-SYNTAX-BREAK		      ;F
+      DDT-SYNTAX-BREAK		      ;G
+      DDT-SYNTAX-BREAK		      ;H
+      DDT-SYNTAX-BREAK		      ;I
+      DDT-SYNTAX-BREAK		      ;J
+      DDT-SYNTAX-BREAK		      ;K
+      DDT-SYNTAX-CLEAR-SCREEN ;L
+      DDT-SYNTAX-BREAK		      ;M
+      DDT-SYNTAX-BREAK		      ;N
+      DDT-SYNTAX-BREAK		      ;O
+      DDT-SYNTAX-BREAK		      ;P
+      DDT-SYNTAX-BREAK		      ;Q
+      DDT-SYNTAX-BREAK		      ;R
+      DDT-SYNTAX-BREAK		      ;S
+      DDT-SYNTAX-BREAK		      ;T
+      DDT-SYNTAX-BREAK		      ;U
+      DDT-SYNTAX-BREAK		      ;V
+      DDT-SYNTAX-BREAK		      ;W
+      DDT-SYNTAX-BREAK		      ;X
+      DDT-SYNTAX-BREAK		      ;Y
+      DDT-SYNTAX-BREAK		      ;Z
+      (*REPEAT 6 DDT-SYNTAX-BREAK)
+      (*REPEAT-EVAL 32 (+ 101 DDT-RPCNT))      ;MAP LOWER CASE INTO UPPER CASE
+      (*REPEAT 5 DDT-SYNTAX-BREAK)
+      (*REPEAT 7 DDT-SYNTAX-BREAK)
+      DDT-SYNTAX-BREAK
+      (*REPEAT 5 DDT-SYNTAX-BREAK)
+      DDT-SYNTAX-BREAK
+      (*REPEAT 2 DDT-SYNTAX-BREAK))
+(							;ALT CHARACTERS
+      (*REPEAT 10 DDT-SYNTAX-BREAK)
+      DDT-SYNTAX-BREAK		      ;(
+      DDT-SYNTAX-BREAK		      ;)
+      (*REPEAT 6 DDT-SYNTAX-ALPHANUMERIC)
+      (*REPEAT 12 DDT-SYNTAX-ALPHANUMERIC)	      ;digits
+      (*REPEAT 2 DDT-SYNTAX-BREAK)
+
+      DDT-SYNTAX-BREAK		      ;<
+      DDT-SYNTAX-BREAK		      ;=
+      DDT-SYNTAX-BREAK		      ;>
+      DDT-SYNTAX-BREAK		      ;?
+      DDT-SYNTAX-BREAK		      ;@
+      DDT-SYNTAX-BREAK		      ;A
+      DDT-SYNTAX-BREAK		      ;B
+      DDT-SYNTAX-BREAK		      ;C
+      DDT-SYNTAX-BREAK		      ;D
+      DDT-SYNTAX-BREAK		      ;E
+      DDT-SYNTAX-BREAK		      ;F
+      DDT-SYNTAX-BREAK		      ;G
+      DDT-SYNTAX-BREAK		      ;H
+      DDT-SYNTAX-BREAK		      ;I
+      DDT-SYNTAX-BREAK		      ;J
+      DDT-SYNTAX-BREAK		      ;K
+      DDT-SYNTAX-BREAK		      ;L
+      DDT-SYNTAX-BREAK		      ;M
+      DDT-SYNTAX-BREAK		      ;N
+      DDT-SYNTAX-BREAK		      ;O
+      DDT-SYNTAX-BREAK		      ;P
+      DDT-SYNTAX-BREAK		      ;Q
+      DDT-SYNTAX-BREAK		      ;R
+      DDT-SYNTAX-BREAK		      ;S
+      DDT-SYNTAX-BREAK		      ;T
+      DDT-SYNTAX-BREAK		      ;U
+      DDT-SYNTAX-BREAK		      ;V
+      DDT-SYNTAX-BREAK		      ;W
+      DDT-SYNTAX-BREAK		      ;X
+      DDT-SYNTAX-BREAK		      ;Y
+      DDT-SYNTAX-BREAK		      ;Z
+      DDT-SYNTAX-BREAK		      ;[
+      'DDT-CMD-BACKSLASH	      ;\
+      DDT-SYNTAX-BREAK		      ;]
+      'DDT-CMD-UPARROW  	      ;^
+      'DDT-CMD-UNDERSCORE             ;_
+      DDT-SYNTAX-BREAK		      ;`
+      (*REPEAT-EVAL 32 (+ 101 DDT-RPCNT))      ;MAP LOWER CASE INTO UPPER CASE
+      (*REPEAT 5 DDT-SYNTAX-BREAK)
+      DDT-SYNTAX-BREAK		      ;NULL
+      DDT-SYNTAX-BREAK		      ;BREAK
+      DDT-SYNTAX-FLUSH-TYPEIN	      ;CLEAR
+      DDT-SYNTAX-BREAK		      ;CALL
+      DDT-SYNTAX-BREAK		      ;ESCAPE
+      DDT-SYNTAX-BREAK		      ;BACKNEXT
+      DDT-SYNTAX-BREAK		      ;HELP
+      DDT-SYNTAX-RUBOUT		      ;RUBOUT
+      DDT-SYNTAX-BREAK		      ;BS
+      DDT-SYNTAX-BREAK		      ;TAB
+      'DDT-CMD-LINE		      ;LINE
+      DDT-SYNTAX-BREAK		      ;VT
+      DDT-SYNTAX-CLEAR-SCREEN	      ;FORM
+      'DDT-CMD-RETURN		      ;RETURN
+      (*REPEAT 2 DDT-SYNTAX-BREAK))
+(							;ALT-CONTROL CHARACTERS
+      (*REPEAT 10 DDT-SYNTAX-BREAK)
+      DDT-SYNTAX-BREAK		      ;(
+      DDT-SYNTAX-BREAK		      ;)
+      (*REPEAT 6 DDT-SYNTAX-BREAK)
+      (*REPEAT 12 DDT-SYNTAX-ALPHANUMERIC)	      ;digits
+      (*REPEAT 2 DDT-SYNTAX-BREAK)
+
+      DDT-SYNTAX-BREAK		      ;<
+      DDT-SYNTAX-BREAK		      ;=
+      DDT-SYNTAX-BREAK		      ;>
+      DDT-SYNTAX-BREAK		      ;?
+      DDT-SYNTAX-BREAK		      ;@
+      DDT-SYNTAX-BREAK		      ;A
+      DDT-SYNTAX-BREAK		      ;B
+      DDT-SYNTAX-BREAK		      ;C
+      DDT-SYNTAX-FLUSH-TYPEIN ;D
+      DDT-SYNTAX-BREAK		      ;E
+      DDT-SYNTAX-BREAK		      ;F
+      DDT-SYNTAX-BREAK		      ;G
+      DDT-SYNTAX-BREAK		      ;H
+      DDT-SYNTAX-BREAK		      ;I
+      DDT-SYNTAX-BREAK		      ;J
+      DDT-SYNTAX-BREAK		      ;K
+      DDT-SYNTAX-CLEAR-SCREEN ;L
+      DDT-SYNTAX-BREAK		      ;M
+      DDT-SYNTAX-BREAK		      ;N
+      DDT-SYNTAX-BREAK		      ;O
+      DDT-SYNTAX-BREAK		      ;P
+      DDT-SYNTAX-BREAK		      ;Q
+      DDT-SYNTAX-BREAK		      ;R
+      DDT-SYNTAX-BREAK		      ;S
+      DDT-SYNTAX-BREAK		      ;T
+      DDT-SYNTAX-BREAK		      ;U
+      DDT-SYNTAX-BREAK		      ;V
+      DDT-SYNTAX-BREAK		      ;W
+      DDT-SYNTAX-BREAK		      ;X
+      DDT-SYNTAX-BREAK		      ;Y
+      DDT-SYNTAX-BREAK		      ;Z
+      (*REPEAT 6 DDT-SYNTAX-BREAK)
+      (*REPEAT-EVAL 32 (+ 101 DDT-RPCNT))      ;MAP LOWER CASE INTO UPPER CASE
+      (*REPEAT 5 DDT-SYNTAX-BREAK)
+      (*REPEAT 7 DDT-SYNTAX-BREAK)
+      DDT-SYNTAX-BREAK
+      (*REPEAT 5 DDT-SYNTAX-BREAK)
+      DDT-SYNTAX-BREAK
+      (*REPEAT 2 DDT-SYNTAX-BREAK))
+(							;ALT-ALT CHARACTERS
+      (*REPEAT 10 DDT-SYNTAX-BREAK)
+      DDT-SYNTAX-BREAK		      ;(
+      DDT-SYNTAX-BREAK		      ;)
+      (*REPEAT 6 DDT-SYNTAX-ALPHANUMERIC)
+      (*REPEAT 12 DDT-SYNTAX-ALPHANUMERIC)	      ;digits
+      (*REPEAT 2 DDT-SYNTAX-BREAK)
+
+      DDT-SYNTAX-BREAK		      ;<
+      DDT-SYNTAX-BREAK		      ;=
+      DDT-SYNTAX-BREAK		      ;>
+      DDT-SYNTAX-BREAK		      ;?
+      DDT-SYNTAX-BREAK		      ;@
+      DDT-SYNTAX-BREAK		      ;A
+      DDT-SYNTAX-BREAK		      ;B
+      DDT-SYNTAX-BREAK		      ;C
+      DDT-SYNTAX-BREAK		      ;D
+      DDT-SYNTAX-BREAK		      ;E
+      DDT-SYNTAX-BREAK		      ;F
+      DDT-SYNTAX-BREAK		      ;G
+      DDT-SYNTAX-BREAK		      ;H
+      DDT-SYNTAX-BREAK		      ;I
+      DDT-SYNTAX-BREAK		      ;J
+      DDT-SYNTAX-BREAK		      ;K
+      DDT-SYNTAX-BREAK		      ;L
+      DDT-SYNTAX-BREAK		      ;M
+      DDT-SYNTAX-BREAK		      ;N
+      DDT-SYNTAX-BREAK		      ;O
+      DDT-SYNTAX-BREAK		      ;P
+      DDT-SYNTAX-BREAK		      ;Q
+      DDT-SYNTAX-BREAK		      ;R
+      DDT-SYNTAX-BREAK		      ;S
+      DDT-SYNTAX-BREAK		      ;T
+      DDT-SYNTAX-BREAK		      ;U
+      DDT-SYNTAX-BREAK		      ;V
+      DDT-SYNTAX-BREAK		      ;W
+      DDT-SYNTAX-BREAK		      ;X
+      DDT-SYNTAX-BREAK		      ;Y
+      DDT-SYNTAX-BREAK		      ;Z
+      DDT-SYNTAX-BREAK		      ;[
+      'DDT-CMD-BACKSLASH	      ;\
+      DDT-SYNTAX-BREAK		      ;]
+      'DDT-CMD-UPARROW  	      ;^
+      'DDT-CMD-UNDERSCORE             ;_
+      DDT-SYNTAX-BREAK		      ;`
+      (*REPEAT-EVAL 32 (+ 101 DDT-RPCNT))      ;MAP LOWER CASE INTO UPPER CASE
+      (*REPEAT 5 DDT-SYNTAX-BREAK)
+      DDT-SYNTAX-BREAK		      ;NULL
+      DDT-SYNTAX-BREAK		      ;BREAK
+      DDT-SYNTAX-FLUSH-TYPEIN	      ;CLEAR
+      DDT-SYNTAX-BREAK		      ;CALL
+      DDT-SYNTAX-BREAK		      ;ESCAPE
+      DDT-SYNTAX-BREAK		      ;BACKNEXT
+      DDT-SYNTAX-BREAK		      ;HELP
+      DDT-SYNTAX-RUBOUT		      ;RUBOUT
+      DDT-SYNTAX-BREAK		      ;BS
+      DDT-SYNTAX-BREAK		      ;TAB
+      'DDT-CMD-LINE		      ;LINE
+      DDT-SYNTAX-BREAK		      ;VT
+      DDT-SYNTAX-CLEAR-SCREEN	      ;FORM
+      'DDT-CMD-RETURN		      ;RETURN
+      (*REPEAT 2 DDT-SYNTAX-BREAK))
+(							;ALT-ALT-CONTROL CHARACTERS
+      (*REPEAT 10 DDT-SYNTAX-BREAK)
+      DDT-SYNTAX-BREAK		      ;(
+      DDT-SYNTAX-BREAK		      ;)
+      (*REPEAT 6 DDT-SYNTAX-BREAK)
+      (*REPEAT 12 DDT-SYNTAX-ALPHANUMERIC)	      ;digits
+      (*REPEAT 2 DDT-SYNTAX-BREAK)
+
+      DDT-SYNTAX-BREAK		      ;<
+      DDT-SYNTAX-BREAK		      ;=
+      DDT-SYNTAX-BREAK		      ;>
+      DDT-SYNTAX-BREAK		      ;?
+      DDT-SYNTAX-BREAK		      ;@
+      DDT-SYNTAX-BREAK		      ;A
+      DDT-SYNTAX-BREAK		      ;B
+      DDT-SYNTAX-BREAK		      ;C
+      DDT-SYNTAX-FLUSH-TYPEIN ;D
+      DDT-SYNTAX-BREAK		      ;E
+      DDT-SYNTAX-BREAK		      ;F
+      DDT-SYNTAX-BREAK		      ;G
+      DDT-SYNTAX-BREAK		      ;H
+      DDT-SYNTAX-BREAK		      ;I
+      DDT-SYNTAX-BREAK		      ;J
+      DDT-SYNTAX-BREAK		      ;K
+      DDT-SYNTAX-CLEAR-SCREEN ;L
+      DDT-SYNTAX-BREAK		      ;M
+      DDT-SYNTAX-BREAK		      ;N
+      DDT-SYNTAX-BREAK		      ;O
+      DDT-SYNTAX-BREAK		      ;P
+      DDT-SYNTAX-BREAK		      ;Q
+      DDT-SYNTAX-BREAK		      ;R
+      DDT-SYNTAX-BREAK		      ;S
+      DDT-SYNTAX-BREAK		      ;T
+      DDT-SYNTAX-BREAK		      ;U
+      DDT-SYNTAX-BREAK		      ;V
+      DDT-SYNTAX-BREAK		      ;W
+      DDT-SYNTAX-BREAK		      ;X
+      DDT-SYNTAX-BREAK		      ;Y
+      DDT-SYNTAX-BREAK		      ;Z
+      (*REPEAT 6 DDT-SYNTAX-BREAK)
+      (*REPEAT-EVAL 32 (+ 101 DDT-RPCNT))      ;MAP LOWER CASE INTO UPPER CASE
+      (*REPEAT 5 DDT-SYNTAX-BREAK)
+      (*REPEAT 7 DDT-SYNTAX-BREAK)
+      DDT-SYNTAX-BREAK
+      (*REPEAT 5 DDT-SYNTAX-BREAK)
+      DDT-SYNTAX-BREAK
+      (*REPEAT 2 DDT-SYNTAX-BREAK))
+)))
